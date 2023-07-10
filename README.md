@@ -31,7 +31,7 @@ pip install ./datasets
 pip install -e .
 ```
 
-4. Download the fonts using the repo [go-noto-universal](https://github.com/satbyy/go-noto-universal).
+4. Download the fonts using the repo [go-noto-universal](https://github.com/satbyy/go-noto-universal) into a folder called "fonts".
 
 ## Pretraining PixelSum
 TBD

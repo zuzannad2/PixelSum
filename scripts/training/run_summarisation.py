@@ -287,9 +287,9 @@ def main():
         data_args.num_beams if data_args.num_beams is not None else training_args.generation_num_beams
     )
 
-    # training_args.early_stopping_patience = (
-    #     data_args.early_stopping_patience if data_args.early_stopping_patience is not None else training_args.early_stopping_patience
-    # )
+    training_args.early_stopping_patience = (
+        data_args.early_stopping_patience if data_args.early_stopping_patience is not None else training_args.early_stopping_patience
+    )
 
     training_args.generation_max_length = data_args.val_max_target_length
 
