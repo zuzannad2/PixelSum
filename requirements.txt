@@ -15,3 +15,6 @@ spacy
 submitit
 transformers==4.17.0
 wandb
+evaluate
+rouge-score
+bert-score
