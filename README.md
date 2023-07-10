@@ -31,9 +31,7 @@ pip install ./datasets
 pip install -e .
 ```
 
-4. Download the fonts using the repo [go-noto-universal](https://github.com/satbyy/go-noto-universal) into a folder called "fonts".
+4. Download fallback fonts using ```python3 -m pixel.scripts.data.download_fallback_fonts.py fonts```. Download the font GoNotoCurrent.ttf using the repo [go-noto-universal](https://github.com/satbyy/go-noto-universal) into the folder called "fonts".
 
-## Pretraining PixelSum
-TBD
 ## Finetuning PixelSum
 PixelSum can be finetuning by running ```train.sh``` which runs the ```run_summarisation.py``` script.
