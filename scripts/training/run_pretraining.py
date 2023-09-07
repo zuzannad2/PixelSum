@@ -95,7 +95,7 @@ def get_model_and_config(model_args: argparse.Namespace):
             model_args.decoder_name,
             cross_attention_reduce_factor=1
         )
-    if model_args.train_encoder():
+    if model_args.train_encoder:
         for param in model.encoder.parameters():
             param.requires_grad = True
 
