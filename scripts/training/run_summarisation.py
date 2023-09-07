@@ -118,23 +118,6 @@ def get_model_and_config(model_args: argparse.Namespace):
     
     return model, model.config
 
-# def register_model_and_config():
-#     from transformers import AutoModelForCausalLM
-
-#     AutoConfig.register("pixelsum", PIXELSumConfig)
-#     AutoModel.register(PIXELSumConfig, PIXELSumModel)
-#     AutoModelForCausalLM.register(PIXELSumConfig, PIXELSumModel)
-
-# def load_model(args, checkpoint_path):
-#     from transformers import AutoModelForCausalLM
-#     config = AutoConfig.from_pretrained(checkpoint_path + '/config.json')
-#     model = AutoModel.from_pretrained(checkpoint_path)
-#     model.config = config
-#     #model.eval()
-#     model.to(args.device)
-#     print(model)
-#     return model
-
 def main():  
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, Seq2SeqTrainingArguments))  
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()

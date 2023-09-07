@@ -67,9 +67,13 @@ class ModelArguments:
     dropout_prob: float = field(
         default=0.2, metadata={"help": "Dropout probability for attention blocks and classification head"}
     )
+    train_encoder: bool = field(
+        default=False,
+        metadata={"help": "Whether to enable updating the weights of the encoder."}
+    )
     train_decoder: bool = field(
         default=False,
-        metadata={"help": "Whether to freeze updating the weights of the decoder."}
+        metadata={"help": "Whether to enable updating the weights of the decoder. Note: XA always enabled."}
     )
 
     def __post_init__(self):
