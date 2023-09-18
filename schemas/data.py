@@ -22,7 +22,7 @@ class DataTrainingArguments:
         },
     )
     max_target_length: Optional[int] = field(
-        default=190,
+        default=60,
         metadata={
             "help": (
                 "The maximum total sequence length for target text after tokenization. Sequences longer "
@@ -40,9 +40,6 @@ class DataTrainingArguments:
                 "during ``evaluate`` and ``predict``."
             )
         },
-    )
-    overwrite_cache: bool = field(
-        default=False, metadata={"help": "Overwrite the cached preprocessed datasets or not."}
     )
     preprocessing_num_workers: Optional[int] = field(
         default=None,
@@ -112,3 +109,93 @@ class DataTrainingArguments:
     def __post_init__(self):
         if self.dataset_name is None:
             raise ValueError("Need a dataset name.")
+
+
+@dataclass
+class TrainingArguments:
+    """
+    Arguments pertaining to what data we are going to input our model for training and eval.
+
+    Using `HfArgumentParser` we can turn this class
+    into argparse arguments to be able to specify them on
+    the command line.
+    """
+    predict_with_generate: Optional[bool] = field(
+        default=True, metadata={"help": "Whether to generate text when running predictions."}
+    )
+    overwrite_cache: Optional[bool] = field(
+        default=False,
+        metadata={
+            "help": "Overwrite the cached training and evaluation sets."
+        }
+    )
+    per_device_eval_batch_size: Optional[int] = field(
+        default=8,
+    )
+    learning_rate: Optional[float] = field(
+        default=5e-5,
+        metadata = {"help": "Initial learning rate (after the potential warmup period) to use."}
+    )
+    push_to_hub: Optional[bool] = field(
+        default=False,
+        metadata={"help": "Whether to push model to hub."}
+    )
+    hub_model_id: str = field(
+        default=None
+    )
+    with_tracking: str = field(
+        default=True
+    )
+    resume_from_checkpoint: str = field(
+        default=None
+    )
+    checkpointing_steps: str = field(
+        default=None
+    )
+    trust_remote_code: bool = field(
+        default=True
+    )
+    hub_token: str = field(
+        default=None
+    )
+    per_device_train_batch_size: int = field(
+        default=32
+    )
+    num_train_epochs: int = field(
+        default=10
+    )
+    weight_decay: float = field(
+        default=0.0
+    )
+    max_train_steps: int = field(
+        default=None
+    )
+    gradient_accumulation_steps: int = field(
+        default=None
+    )
+    lr_scheduler_type: str = field(
+        default=None
+    )
+    num_warmup_steps: int = field(
+        default = 0
+    )
+    output_dir: str = field(
+        default=None
+    )
+    seed: int = field(
+        default=42
+    )
+    model_type: str = field(
+        default='PIXELSum'
+    )
+    report_to: str = field(
+        default='wandb'
+    )
+    logging_steps: int = field(
+        default=1000
+    )
+    
+
+
+
+ 

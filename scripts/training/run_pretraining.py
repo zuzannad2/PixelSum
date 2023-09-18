@@ -1,15 +1,12 @@
 import logging
 import os
 import sys
-from typing import Dict, List, Tuple, Union, Optional
-from dataclasses import dataclass, field
 
 import datasets
 import evaluate
 import numpy as np
 from datasets import load_dataset
 
-from random import randint
 import argparse
 import transformers
 import torch
@@ -26,6 +23,7 @@ from transformers import (
     EvalPrediction,
     HfArgumentParser,
     EarlyStoppingCallback,
+    DataCollatorForSeq2Seq
 )
 from pixel import (
     PangoCairoTextRenderer,
@@ -39,6 +37,8 @@ from schemas.model import ModelArguments
 from schemas.data import DataTrainingArguments
 
 logger = logging.getLogger(__name__)
+
+wandb.init(project="pixelsum")
 
 def get_renderer(model_args: argparse.Namespace):
     renderer_cls = PyGameTextRenderer if model_args.rendering_backend == "pygame" else PangoCairoTextRenderer
@@ -158,66 +158,60 @@ def main():
         size=(renderer.pixels_per_patch, renderer.pixels_per_patch * renderer.max_seq_length))
 
     def preprocess_examples(batch):
-        documents = batch['text']
+        docs, summaries = batch['example'], batch['summary']
         data = {"pixel_values": [], "attention_mask": [], "label_ids": []}
-        
+
         def _pad_input_ids(input_ids, max_length=data_args.max_target_length):
             input_ids += [-100] * (max_length - len(input_ids))
             return input_ids
         
-        for document in documents:
-            # Generate two random numbers for length of document and summary 
-            doc_length = randint(400, 529) # Patches in the encoder
-            sum_length = randint(20, 50) # Tokens in the decoder
-            
-            document = document.replace('\n','')
-            document = document.split(' ')
-            text = document[:doc_length]
-            text = ' '.join(text)
-
-
-            summary = document[doc_length:(doc_length+sum_length)]
-            summary = ' '.join(summary)
-
-            encoding = renderer(text)
+        for document, summary in zip(docs, summaries):
+            encoding = renderer(document)
             image = encoding.pixel_values
             num_patches = encoding.num_text_patches
-            print(num_patches)
-            pixel_values = transforms(Image.fromarray(image))
-            attention_mask = get_attention_mask(num_patches, seq_length=data_args.max_seq_length)
             
+            pixel_values = transforms(Image.fromarray(image))
+            attention_mask = get_attention_mask(num_patches, seq_length=529)
+
             text_ids = tokenizer.encode(summary)
-            input_ids = _pad_input_ids(text_ids)
-       
-            assert len(attention_mask) == data_args.max_seq_length
+            text_ids = text_ids[:data_args.max_target_length] # Truncate
+            input_ids = _pad_input_ids(text_ids) # Pad
+        
+            assert len(attention_mask) == 529
             
             data["pixel_values"].append(torch.tensor(pixel_values))
             data["attention_mask"].append(torch.tensor(attention_mask))
             data["label_ids"].append(torch.tensor(input_ids))
 
         return data
-
-    dataset = load_dataset(path = data_args.dataset_name, language = 'en', date = '20220301')
+        
+        
+    dataset = load_dataset("zuzannad1/pixelsum_wiki", split="train", cache_dir='/scratch/project/dd-23-53/zuz/data/wiki-pixel')
+    
+    split = dataset.train_test_split(test_size=0.1)
     
     if training_args.do_train:
-        train_dataset = dataset['train']
+        train_dataset = split['train']
         if data_args.max_train_samples is not None:
-            train_dataset = train_dataset.shuffle().select(range(data_args.max_train_samples))
-        train_dataset = train_dataset.map(preprocess_examples, batched=True, remove_columns=["id", "url", "title", "string"],num_proc=data_args.preprocessing_num_workers)
+            train_dataset = train_dataset.select(range(data_args.max_train_samples)).shuffle(seed=42)
+        train_dataset.set_transform(preprocess_examples)
+        #train_dataset = train_dataset.map(preprocess_examples, batched=True, remove_columns=["example", "summary"],num_proc=data_args.preprocessing_num_workers)
         logger.info(f'Successfully loaded the training data with {len(train_dataset)} examples.')
-
+    
     if training_args.do_eval:
-        val_dataset = dataset['validation']
+        val_dataset = split['test']
         if data_args.max_eval_samples is not None:
             val_dataset = val_dataset.select(range(data_args.max_eval_samples))
-        val_dataset = val_dataset.map(preprocess_examples, batched=True, remove_columns=["id", "url", "title", "string"], num_proc=data_args.preprocessing_num_workers)
+        val_dataset.set_transform(preprocess_examples)
+        #val_dataset = val_dataset.map(preprocess_examples, batched=True, remove_columns=["example", "summary"],num_proc=data_args.preprocessing_num_workers)
         logger.info(f'Successfully loaded the validation data with {len(val_dataset)} examples.')
 
     if training_args.do_predict:
-        test_dataset = dataset['test']
+        test_dataset = split['test']
         if data_args.max_predict_samples is not None:
             test_dataset = test_dataset.select(range(data_args.max_predict_samples))
-        test_dataset = test_dataset.map(preprocess_examples, batched=True, remove_columns=["id", "url", "title", "string"], num_proc=data_args.preprocessing_num_workers)
+        test_dataset.set_transform(preprocess_examples)
+        #test_dataset = test_dataset.map(preprocess_examples, batched=True, remove_columns=["example", "summary"],num_proc=data_args.preprocessing_num_workers)
         logger.info(f'Successfully loaded the testing data with {len(test_dataset)} examples.')
 
     logger.warning(
@@ -293,6 +287,11 @@ def main():
 
     logger.info("Training/evaluation parameters %s", training_args)
 
+    data_collator = DataCollatorForSeq2Seq(
+        tokenizer,
+        model=model,
+        pad_to_multiple_of=8 if training_args.fp16 else None,)
+    
     trainer = Seq2SeqTrainer(
         model=model,
         args=training_args,
@@ -301,7 +300,7 @@ def main():
         eval_dataset=val_dataset if training_args.do_eval else None,
         tokenizer=renderer,
         compute_metrics=compute_metrics,
-        callbacks = [EarlyStoppingCallback(early_stopping_patience=training_args.early_stopping_patience)]
+        #callbacks = [EarlyStoppingCallback(early_stopping_patience=training_args.early_stopping_patience)]
     )
 
     last_checkpoint = None
