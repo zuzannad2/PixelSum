@@ -11,6 +11,9 @@ from datasets import load_dataset
 
 from random import randint
 import argparse
+from src.pixelsum.modeling_pixelsum import PIXELSumModel
+
+
 import transformers
 import torch
 import numpy as np
@@ -36,13 +39,14 @@ from pixel import (
     PoolingMode
 )
 from pixel.utils.misc import get_attention_mask
-from src.pixelsum.modeling_pixelsum import PIXELSumModel
 
-from schemas.custom_args import ModelArguments, DataTrainingArguments
 
+from schemas.model import ModelArguments
+from schemas.data import DataTrainingArguments
 
 logger = logging.getLogger(__name__)
      
+#wandb.init(project="pixelsum")
 
 def log_predictions(args, p, tokenizer, prefix):
     # Initialize wandb if not already done
@@ -87,15 +91,14 @@ def get_renderer_and_tokenizer(model_args: argparse.Namespace):
 
     return renderer, tokenizer
 
-def get_model_and_config(model_args: argparse.Namespace):    
-    model = PIXELSumModel.from_encoder_decoder_pretrained(
-            model_args.encoder_name,
-            model_args.decoder_name,
-            cross_attention_reduce_factor=1
+def get_model_and_config(model_args: argparse.Namespace): 
+
+    model = PIXELSumModel.from_pretrained(
+            model_args.model_path,
         )
 
     for param in model.encoder.parameters():
-        param.requires_grad = True
+        param.requires_grad = False
 
     if "opt" in model_args.decoder_name:
         if not model_args.train_decoder:
@@ -170,7 +173,8 @@ def main():
             attention_mask = get_attention_mask(num_patches, seq_length=data_args.max_seq_length)
             
             text_ids = tokenizer.encode(summary)
-            input_ids = _pad_input_ids(text_ids)
+            text_ids = text_ids[:data_args.max_target_length] # Truncate
+            input_ids = _pad_input_ids(text_ids) # Pad
        
             assert len(attention_mask) == data_args.max_seq_length
             
@@ -228,7 +232,7 @@ def main():
 
     def postprocess_text(preds, labels):
         preds = [pred.strip() for pred in preds]
-        labels = [[label.strip()] for label in labels]
+        labels = [label.strip() for label in labels]
 
         return preds, labels
 
@@ -285,7 +289,7 @@ def main():
         eval_dataset=val_dataset if training_args.do_eval else None,
         tokenizer=renderer,
         compute_metrics=compute_metrics,
-        callbacks = [EarlyStoppingCallback(early_stopping_patience=training_args.early_stopping_patience)]
+        #callbacks = [EarlyStoppingCallback(early_stopping_patience=training_args.early_stopping_patience)]
     )
 
     last_checkpoint = None
@@ -311,22 +315,6 @@ def main():
         trainer.save_metrics("train", metrics)
         trainer.save_state()
 
-    # THIS IS DISABLED AS EVALUATION SET USED ONGOINGLY DURING TRAINING
-    # if training_args.do_eval:
-    #     logger.info("*** Evaluate ***")
-
-    #     metrics = trainer.evaluate(val_dataset, metric_key_prefix="eval") # Outputs metrics
-    #     #metrics = outputs.metrics
-
-    #     #max_eval_samples = data_args.max_eval_samples if data_args.max_eval_samples is not None else len(val_dataset)
-    #     #metrics["eval_samples"] = min(max_eval_samples, len(val_dataset))
-
-    #     trainer.log_metrics("eval", metrics)
-    #     trainer.save_metrics("eval", metrics)
-
-    #     if data_args.log_predictions:
-    #         log_predictions(args=training_args, p=outputs, tokenizer = tokenizer, prefix="eval")
-
     if training_args.do_predict:
         logger.info("*** Predict ***")
         predict_results = trainer.predict(test_dataset, metric_key_prefix="test")
@@ -340,8 +328,7 @@ def main():
         trainer.log_metrics("predict", metrics)
         trainer.save_metrics("predict", metrics)
         
-        if data_args.log_predictions:
-            log_predictions(args=training_args, p=predict_results, tokenizer = tokenizer, prefix="test")
+
     
 if __name__ == '__main__':
     main()

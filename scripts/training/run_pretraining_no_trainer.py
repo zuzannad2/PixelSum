@@ -62,12 +62,9 @@ from pixel import (
 
 from PIL import Image
 
-from transformers.utils import check_min_version
 from transformers.utils.versions import require_version
 from pixelsum.modeling_pixelsum import PIXELSumModel
-from schemas.data import DataTrainingArguments, TrainingArguments
-
-from schemas.model import ModelArguments
+from schemas.custom_args import DataTrainingArguments, TrainingArguments, ModelArguments
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 #check_min_version("4.34.0.dev0")
@@ -79,7 +76,7 @@ require_version("datasets>=1.8.0", "To fix: pip install -r examples/pytorch/tran
 MODEL_CONFIG_CLASSES = list(MODEL_MAPPING.keys())
 MODEL_TYPES = tuple(conf.model_type for conf in MODEL_CONFIG_CLASSES)
 
-#wandb.init(project="pixelsum")
+wandb.init(project="pixelsum")
 
 def get_renderer(model_args: argparse.Namespace):
     renderer_cls = PyGameTextRenderer if model_args.rendering_backend == "pygame" else PangoCairoTextRenderer
@@ -192,7 +189,7 @@ def main():
             os.makedirs(training_args.output_dir, exist_ok=True)
     accelerator.wait_for_everyone()
     
-    dataset = load_dataset("zuzannad1/pixelsum_wiki", split="train", cache_dir='/scratch/project/dd-23-53/zuz/data/wiki-pixel')
+    dataset = load_dataset("zuzannad1/pixelsum_wiki", split="train")
     
     # Initialise model and processors
     model, config = get_model_and_config(model_args)
@@ -243,16 +240,6 @@ def main():
 
         return data
         
-    column_names = ["example", "summary"]
-    # with accelerator.main_process_first():
-    #     processed_dataset = dataset.map(
-    #         preprocess_examples,
-    #         batched=True,
-    #         num_proc=data_args.preprocessing_num_workers,
-    #         remove_columns=column_names,
-    #         load_from_cache_file=not training_args.overwrite_cache,
-    #         desc="Running preprocessing on dataset",
-    #     )
 
     split_dataset = dataset.train_test_split(test_size=0.1)
     
@@ -331,31 +318,6 @@ def main():
     if checkpointing_steps is not None and checkpointing_steps.isdigit():
         checkpointing_steps = int(checkpointing_steps)
 
-
-    bertscore, rouge = evaluate.load('bertscore'), evaluate.load('rouge')
-
-    def push_predictions_to_wandb(decoded_preds, decoded_labels, prefix):
-        data = []
-        out_file = os.path.join(training_args.output_dir, f"{prefix}_predictions.csv")
-        with open(out_file, "w", encoding="utf-8") as f:
-            f.write("Predicted\Reference\n")
-            for p, r in zip(decoded_preds, decoded_labels):
-                data.append([p, r])
-                f.write(f"'Predicted: {p} \t, Reference: {r} \n")
-                f.write("\n")
-
-        logger.info(f"Saved predictions, masks and labels to {out_file}")
-        logger.info(f"Logging as table to wandb")
-
-        preds_table = wandb.Table(columns=["Predicted", "Reference"], data=data)
-        accelerator.log({f"{prefix}_outputs": preds_table})
-
-    def postprocess_text(preds, labels):
-        preds = [pred.strip() for pred in preds]
-        labels = [[label.strip()] for label in labels]
-
-        return preds, labels
-
     # Train!
     total_batch_size = training_args.per_device_train_batch_size * accelerator.num_processes * training_args.gradient_accumulation_steps
 
@@ -420,6 +382,8 @@ def main():
                 total_loss += loss.detach().float()
             loss = loss / training_args.gradient_accumulation_steps
             accelerator.backward(loss)
+            if accelerator.sync_gradients:
+                accelerator.clip_grad_norm_(model.parameters(), 1.0)
             if step % training_args.gradient_accumulation_steps == 0 or step == len(train_dataloader) - 1:
                 optimizer.step()
                 lr_scheduler.step()
@@ -446,87 +410,6 @@ def main():
                 break
 
         model.eval()
-
-        # if data_args.val_max_target_length is None:
-        #     data_args.val_max_target_length = data_args.max_target_length
-
-        # gen_kwargs = {
-        #     "max_length": data_args.val_max_target_length,
-        #     "num_beams": data_args.num_beams,
-        # }
-        # samples_seen = 0
-        
-        # eval_steps = 0
-        # for step, batch in enumerate(eval_dataloader):
-        #     with torch.no_grad():
-                
-        #         generated_tokens = accelerator.unwrap_model(model).generate(
-        #             batch["pixel_values"],
-        #             attention_mask=batch["attention_mask"],
-        #             **gen_kwargs,
-        #         )
-
-        #         generated_tokens = accelerator.pad_across_processes(
-        #             generated_tokens, dim=1, pad_index=tokenizer.pad_token_id
-        #         )
-        #         labels = batch["labels"]
-        #         if not data_args.pad_to_max_length:
-        #             # If we did not pad to max length, we need to pad the labels too
-        #             labels = accelerator.pad_across_processes(batch["labels"], dim=1, pad_index=tokenizer.pad_token_id)
-
-        #         generated_tokens = accelerator.gather(generated_tokens).cpu().numpy()
-        #         labels = accelerator.gather(labels).cpu().numpy()
-
-        #         if data_args.ignore_pad_token_for_loss:
-        #             # Replace -100 in the labels as we can't decode them.
-        #             labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
-
-        #         decoded_preds = tokenizer.batch_decode(generated_tokens, skip_special_tokens=True)
-        #         decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
-
-        #         decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
-                
-        #         # If we are in a multiprocess environment, the last batch has duplicates
-        #         if accelerator.num_processes > 1:
-        #             if step == len(eval_dataloader) - 1:
-        #                 decoded_preds = decoded_preds[: len(eval_dataloader.dataset) - samples_seen]
-        #                 decoded_labels = decoded_labels[: len(eval_dataloader.dataset) - samples_seen]
-        #             else:
-        #                 samples_seen += len(decoded_labels)
-                
-        #         bertscore.add_batch(predictions=decoded_preds, references=decoded_labels)
-        #         rouge.add_batch(predictions=decoded_preds, references=decoded_labels)
-        #         eval_steps += 1
-        
-        # try: # Putting this in a try-except to not break training in case it doenst work
-        #     push_predictions_to_wandb(decoded_labels, decoded_preds, prefix=f"training_{epoch}")
-        # except Exception as e:
-        #     continue
-
-        # bertscore_metrics = bertscore.compute()
-        # rouge_metrics = rouge.compute()
-        # bert_res = {'precision': np.mean(bertscore_metrics['precision']), 'recall': np.mean(bertscore_metrics['recall']), 'f1': np.mean(bertscore_metrics['f1'])}
-        # logger.info({
-        #     "bertscore_precision": bert_res['precision'],
-        #     "bertscore_recall": bert_res['recall'],
-        #     "bertscore_f1": bert_res['f1'],
-        #     "rouge1": rouge_metrics['rouge1'],
-        #     "rouge2": rouge_metrics['rouge2'],
-        #     "rougeL": rouge_metrics['rougeL'],
-        #     "rougeLsum": rouge_metrics['rougeLsum']
-        # })
-
-        # if training_args.with_tracking:
-        #     accelerator.log(
-        #         {
-        #             "rouge1": rouge_metrics["rouge1"],
-        #             "bertscore_f1": bert_res['f1'],
-        #             "train_loss": total_loss.item() / len(train_dataloader),
-        #             "epoch": epoch,
-        #             "step": completed_steps,
-        #         },
-        #         step=completed_steps,
-        #     )
 
         if training_args.push_to_hub and epoch < training_args.num_train_epochs - 1:
             accelerator.wait_for_everyone()

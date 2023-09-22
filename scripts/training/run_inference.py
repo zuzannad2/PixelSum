@@ -8,7 +8,9 @@ import numpy as np
 from datasets import load_dataset
 
 import argparse
+from src.pixelsum.configuration_pixelsum import PIXELSumConfig
 from src.pixelsum.modeling_pixelsum import PIXELSumModel
+
 import transformers
 import torch
 import numpy as np
@@ -23,8 +25,6 @@ from transformers import (
     Seq2SeqTrainingArguments,
     EvalPrediction,
     HfArgumentParser,
-    EarlyStoppingCallback,
-    DataCollatorForSeq2Seq
 )
 from pixel import (
     PangoCairoTextRenderer,
@@ -34,12 +34,11 @@ from pixel import (
 from pixel.utils.misc import get_attention_mask
 
 
-from schemas.model import ModelArguments
-from schemas.data import DataTrainingArguments
+from schemas.custom_args import ModelArguments, DataTrainingArguments
 
 logger = logging.getLogger(__name__)
 
-#wandb.init(project="pixelsum")
+wandb.init(project="pixelsum")
 
 def get_renderer(model_args: argparse.Namespace):
     renderer_cls = PyGameTextRenderer if model_args.rendering_backend == "pygame" else PangoCairoTextRenderer
@@ -65,6 +64,8 @@ def get_tokenizer(model_args: argparse.Namespace):
 
     return tokenizer
 
+
+
 def log_predictions(args, p, tokenizer, prefix):
     # Initialize wandb if not already done
     if not args.do_train:
@@ -89,35 +90,19 @@ def log_predictions(args, p, tokenizer, prefix):
     wandb.log({f"{prefix}_outputs": preds_table})
 
 
-def get_model_and_config(model_args: argparse.Namespace):  
-
-    model = PIXELSumModel.from_encoder_decoder_pretrained(
-            model_args.encoder_name,
-            model_args.decoder_name,
-            cross_attention_reduce_factor=1
+def load_model(model_args):  
+    config = PIXELSumConfig.from_pretrained(
+        "/home/vpz558/PixelSum/experiments/pretrained_gptsmall",
+    )
+    model = PIXELSumModel.from_pretrained(
+            model_args.model_path,
+            config=config
         )
-    if model_args.train_encoder:
-        for param in model.encoder.parameters():
-            param.requires_grad = True
-
-
-    if "opt" in model_args.decoder_name:
-        if not model_args.train_decoder:
-            for name, param in model.decoder.named_parameters():
-                if 'encoder_attn' not in name:
-                    param.requires_grad = True
-
-    elif "gpt" in model_args.decoder_name:
-        if not model_args.train_decoder:
-            for name, param in model.decoder.named_parameters():
-                if 'crossattention' not in name:
-                    param.requires_grad = False
-   
-    model_parameters = filter(lambda p: p.requires_grad, model.parameters())
-    num_trainable_params = sum([np.prod(p.size()) for p in model_parameters])
-    
-    logger.info('Training a model with {} trainable parameters.'.format(num_trainable_params))
-    logger.info(f"Using dropout with probability {model_args.dropout_prob}")
+    # model = PIXELSumModel.from_encoder_decoder_pretrained(
+    #         model_args.encoder_name,
+    #         model_args.decoder_name,
+    #         cross_attention_reduce_factor=1
+    #     )
     
     return model, model.config
 
@@ -140,8 +125,8 @@ def main():
     transformers.utils.logging.enable_default_handler()
     transformers.utils.logging.enable_explicit_format()
     
-    # Initialise model and processors
-    model, config = get_model_and_config(model_args)
+    # Load pretrained model
+    model, config = load_model(model_args)
     renderer = get_renderer(model_args)
     tokenizer = get_tokenizer(model_args)
     
@@ -149,7 +134,7 @@ def main():
     model.config.decoder_start_token_id = tokenizer.eos_token_id
     model.config.pad_token_id = tokenizer.pad_token_id 
     model.config.eos_token_id = tokenizer.eos_token_id 
-    #model.encoder.config.do_eval = True
+    model.encoder.config.do_eval = True
     
     if 'gpt2' in model_args.decoder_name:
         model.decoder.config.task_specific_params['text-generation']['max_length'] = data_args.val_max_target_length
@@ -158,8 +143,28 @@ def main():
         do_resize=True, 
         size=(renderer.pixels_per_patch, renderer.pixels_per_patch * renderer.max_seq_length))
 
+    def push_predictions_to_wandb(decoded_preds, decoded_labels, prefix):
+        data = []
+        out_file = os.path.join(training_args.output_dir, f"{prefix}_predictions.csv")
+        with open(out_file, "w", encoding="utf-8") as f:
+            f.write("Predicted\Reference\n")
+            for p, r in zip(decoded_preds, decoded_labels):
+                data.append([p, r])
+                f.write(f"'Predicted: {p} \t, Reference: {r} \n")
+                f.write("\n")
+
+        logger.info(f"Saved predictions, masks and labels to {out_file}")
+        logger.info(f"Logging as table to wandb")
+
+        preds_table = wandb.Table(columns=["Predicted", "Reference"], data=data)
+        wandb.log({f"{prefix}_outputs": preds_table})
+    
+    def push_metrics_to_wandb(metrics):
+        metrics_table = wandb.Table(columns=list(metrics.keys()), data=[list(metrics.values())])
+        wandb.log({"test_metrics": metrics_table})
+
     def preprocess_examples(batch):
-        docs, summaries = batch['example'], batch['summary']
+        docs, summaries = batch['document'], batch['summary']
         data = {"pixel_values": [], "attention_mask": [], "label_ids": []}
 
         def _pad_input_ids(input_ids, max_length=data_args.max_target_length):
@@ -187,56 +192,19 @@ def main():
         return data
         
         
-    dataset = load_dataset("zuzannad1/pixelsum_wiki", split="train",)
-    
-    split = dataset.train_test_split(test_size=0.1)
-    
-    if training_args.do_train:
-        train_dataset = split['train']
-        if data_args.max_train_samples is not None:
-            train_dataset = train_dataset.select(range(data_args.max_train_samples)).shuffle(seed=42)
-        train_dataset.set_transform(preprocess_examples)
-        #train_dataset = train_dataset.map(preprocess_examples, batched=True, remove_columns=["example", "summary"],num_proc=data_args.preprocessing_num_workers)
-        logger.info(f'Successfully loaded the training data with {len(train_dataset)} examples.')
-    
-    if training_args.do_eval:
-        val_dataset = split['test']
-        if data_args.max_eval_samples is not None:
-            val_dataset = val_dataset.select(range(data_args.max_eval_samples))
-        val_dataset.set_transform(preprocess_examples)
-        #val_dataset = val_dataset.map(preprocess_examples, batched=True, remove_columns=["example", "summary"],num_proc=data_args.preprocessing_num_workers)
-        logger.info(f'Successfully loaded the validation data with {len(val_dataset)} examples.')
+    test_dataset = load_dataset(data_args.dataset_name, split="test",cache_dir='cached_data')
 
-    if training_args.do_predict:
-        test_dataset = split['test']
-        if data_args.max_predict_samples is not None:
+    test_dataset = test_dataset.map(preprocess_examples, batched=True, remove_columns=["document", "summary", "id"],)
+    
+    if data_args.max_predict_samples is not None:
             test_dataset = test_dataset.select(range(data_args.max_predict_samples))
-        test_dataset.set_transform(preprocess_examples)
-        #test_dataset = test_dataset.map(preprocess_examples, batched=True, remove_columns=["example", "summary"],num_proc=data_args.preprocessing_num_workers)
-        logger.info(f'Successfully loaded the testing data with {len(test_dataset)} examples.')
-
+            
     logger.warning(
         "Device(s): %s, n_gpu: %s, 16-bits training: %s",
         training_args.device,
         training_args.n_gpu,
         training_args.fp16,
     )
-
-    def push_predictions_to_wandb(decoded_preds, decoded_labels, prefix):
-        data = []
-        out_file = os.path.join(training_args.output_dir, f"{prefix}_predictions.csv")
-        with open(out_file, "w", encoding="utf-8") as f:
-            f.write("Predicted\Reference\n")
-            for p, r in zip(decoded_preds, decoded_labels):
-                data.append([p, r])
-                f.write(f"'Predicted: {p} \t, Reference: {r} \n")
-                f.write("\n")
-
-        logger.info(f"Saved predictions, masks and labels to {out_file}")
-        logger.info(f"Logging as table to wandb")
-
-        preds_table = wandb.Table(columns=["Predicted", "Reference"], data=data)
-        wandb.log({f"{prefix}_outputs": preds_table})
 
     def postprocess_text(preds, labels):
         preds = [pred.strip() for pred in preds]
@@ -248,14 +216,20 @@ def main():
         preds, labels = p
         if isinstance(preds, tuple):
             preds = preds[0]
-        decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
-        if data_args.ignore_pad_token_for_loss:
-            # Replace -100 in the labels as we can't decode them.
-            labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
-        decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+        decoded_preds = []
+        decoded_labels = []
+        for pred, label in zip(preds, labels):
+            pred = np.argmax(pred, axis=1)
+            decoded_pred = tokenizer.decode(pred)
+                # Replace -100 in the labels as we can't decode them.
+            label = np.where(label != -100, label, tokenizer.pad_token_id)
+            decoded_label = tokenizer.decode(label, skip_special_tokens=True)
+            decoded_preds.append(decoded_pred)
+            decoded_labels.append(decoded_label)
+
         decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
 
-        push_predictions_to_wandb(decoded_preds, decoded_labels, "training")
+        push_predictions_to_wandb(decoded_preds, decoded_labels, "test")
         return decoded_preds, decoded_labels
 
     bertscore, rouge = evaluate.load('bertscore'), evaluate.load('rouge')
@@ -266,7 +240,7 @@ def main():
         bert = bertscore.compute(predictions=predictions, references=labels, lang='eng')
         bert_res = {'precision': np.mean(bert['precision']), 'recall': np.mean(bert['recall']), 'f1': np.mean(bert['f1'])}
         
-        return {
+        metrics = {
             "bertscore_precision": bert_res['precision'],
             "bertscore_recall": bert_res['recall'],
             "bertscore_f1": bert_res['f1'],
@@ -276,12 +250,11 @@ def main():
             "rougeLsum": rouge_res['rougeLsum']
         }
 
+        push_metrics_to_wandb(metrics)
+        return metrics
+
     training_args.generation_num_beams = (
         data_args.num_beams if data_args.num_beams is not None else training_args.generation_num_beams
-    )
-
-    training_args.early_stopping_patience = (
-        data_args.early_stopping_patience if data_args.early_stopping_patience is not None else training_args.early_stopping_patience
     )
 
     training_args.generation_max_length = data_args.val_max_target_length
@@ -292,35 +265,11 @@ def main():
         model=model,
         args=training_args,
         data_collator=default_data_collator, 
-        train_dataset=train_dataset if training_args.do_train else None,
-        eval_dataset=val_dataset if training_args.do_eval else None,
+        train_dataset=None,
+        eval_dataset=None,
         tokenizer=renderer,
         compute_metrics=compute_metrics,
-        #callbacks = [EarlyStoppingCallback(early_stopping_patience=training_args.early_stopping_patience)]
     )
-
-    last_checkpoint = None
-
-    if training_args.do_train:
-        checkpoint = None
-        if training_args.resume_from_checkpoint is not None:
-            checkpoint = training_args.resume_from_checkpoint
-        elif last_checkpoint is not None:
-            checkpoint = last_checkpoint
-        
-        train_result = trainer.train(resume_from_checkpoint=checkpoint)
-        
-        metrics = train_result.metrics
-        max_train_samples = (
-            data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
-        )
-        metrics["train_samples"] = min(max_train_samples, len(train_dataset))
-
-        trainer.save_model()
-
-        trainer.log_metrics("train", metrics)
-        trainer.save_metrics("train", metrics)
-        trainer.save_state()
 
     if training_args.do_predict:
         logger.info("*** Predict ***")
@@ -335,8 +284,5 @@ def main():
         trainer.log_metrics("predict", metrics)
         trainer.save_metrics("predict", metrics)
         
-        if data_args.log_predictions:
-            log_predictions(args=training_args, p=predict_results, tokenizer = tokenizer, prefix="test")
-    
 if __name__ == '__main__':
     main()
