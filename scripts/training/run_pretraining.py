@@ -183,7 +183,7 @@ def main():
         return data
         
         
-    dataset = load_dataset("zuzannad1/pixelsum_wiki", split="train",)
+    dataset = load_dataset("zuzannad1/pixelsum_wiki", split="train",cache_dir=data_args.data_cache_dir)
     
     split = dataset.train_test_split(test_size=0.1)
     

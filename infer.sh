@@ -34,3 +34,4 @@ python3 -m scripts.training.run_inference \
                 --per_device_eval_batch_size 1 \
                 --num_beams 1 \
                 --max_predict_samples 1500 \
+                --data_cache_dir 'cached_data' \

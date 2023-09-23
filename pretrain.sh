@@ -55,4 +55,5 @@ python3 -m scripts.training.run_pretraining \
                    --num_beams 1 \
                    --report_to "wandb" \
                    --max_eval_samples 100 \
+                   --data_cache_dir 'cached_data' \
                    

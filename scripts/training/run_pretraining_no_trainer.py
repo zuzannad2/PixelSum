@@ -189,7 +189,7 @@ def main():
             os.makedirs(training_args.output_dir, exist_ok=True)
     accelerator.wait_for_everyone()
     
-    dataset = load_dataset("zuzannad1/pixelsum_wiki", split="train")
+    dataset = load_dataset("zuzannad1/pixelsum_wiki", split="train", cache_dir=data_args.data_cache_dir)
     
     # Initialise model and processors
     model, config = get_model_and_config(model_args)

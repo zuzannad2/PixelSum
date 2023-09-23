@@ -173,7 +173,7 @@ def main():
 
         return data
 
-    dataset = load_dataset(path = data_args.dataset_name, cache_dir='cached_data')
+    dataset = load_dataset(path = data_args.dataset_name, cache_dir=data_args.data_cache_dir)
     
     if training_args.do_train:
         train_dataset = dataset['train']

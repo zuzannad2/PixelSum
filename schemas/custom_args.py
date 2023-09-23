@@ -105,6 +105,14 @@ class DataTrainingArguments:
             )
         },
     )
+    data_cache_dir: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Where to cache the datasets."
+            )
+        },
+    )
     
 
     def __post_init__(self):

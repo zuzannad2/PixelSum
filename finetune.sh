@@ -54,6 +54,7 @@ python3 -m scripts.training.run_finetuning \
                    --report_to "wandb" \
                    --max_eval_samples 100 \
                    --max_predict_samples 1500 \
+                   --data_cache_dir 'cached_data' \
                    
 
 

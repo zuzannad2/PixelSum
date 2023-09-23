@@ -164,7 +164,7 @@ def main():
         return data
         
         
-    test_dataset = load_dataset(data_args.dataset_name, split="test",cache_dir='cached_data')
+    test_dataset = load_dataset(data_args.dataset_name, split="test",cache_dir=data_args.data_cache_dir)
 
     test_dataset = test_dataset.map(preprocess_examples, batched=True, remove_columns=["document", "summary", "id"],)
     

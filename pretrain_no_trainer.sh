@@ -42,5 +42,6 @@ accelerate launch --mixed_precision=fp16 scripts/training/run_pretraining_no_tra
                    --pad_to_max_length true \
                    --max_train_steps 300000 \
                    --logging_steps 50 \
+                   --data_cache_dir 'cached_data' \
                   
                   
