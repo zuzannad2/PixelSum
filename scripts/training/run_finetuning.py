@@ -1,15 +1,12 @@
 import logging
 import os
 import sys
-from typing import Dict, List, Tuple, Union, Optional
-from dataclasses import dataclass, field
 
 import datasets
 import evaluate
 import numpy as np
 from datasets import load_dataset
 
-from random import randint
 import argparse
 from src.pixelsum.modeling_pixelsum import PIXELSumModel
 
@@ -28,25 +25,18 @@ from transformers import (
     Seq2SeqTrainingArguments,
     EvalPrediction,
     HfArgumentParser,
-    EarlyStoppingCallback,
-    AutoConfig,
-    AutoModel
 )
 from pixel import (
     PangoCairoTextRenderer,
     PyGameTextRenderer,
     get_transforms,
-    PoolingMode
 )
 from pixel.utils.misc import get_attention_mask
-
-
-from schemas.model import ModelArguments
-from schemas.data import DataTrainingArguments
+from schemas.custom_args import ModelArguments,DataTrainingArguments
 
 logger = logging.getLogger(__name__)
      
-#wandb.init(project="pixelsum")
+wandb.init(project="pixelsum")
 
 def log_predictions(args, p, tokenizer, prefix):
     # Initialize wandb if not already done
@@ -92,7 +82,6 @@ def get_renderer_and_tokenizer(model_args: argparse.Namespace):
     return renderer, tokenizer
 
 def get_model_and_config(model_args: argparse.Namespace): 
-
     model = PIXELSumModel.from_pretrained(
             model_args.model_path,
         )

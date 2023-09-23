@@ -8,7 +8,6 @@ import numpy as np
 from datasets import load_dataset
 
 import argparse
-from src.pixelsum.modeling_pixelsum import PIXELSumModel
 import transformers
 import torch
 import numpy as np
@@ -23,8 +22,6 @@ from transformers import (
     Seq2SeqTrainingArguments,
     EvalPrediction,
     HfArgumentParser,
-    EarlyStoppingCallback,
-    DataCollatorForSeq2Seq
 )
 from pixel import (
     PangoCairoTextRenderer,
@@ -32,14 +29,13 @@ from pixel import (
     get_transforms,
 )
 from pixel.utils.misc import get_attention_mask
-
-
-from schemas.model import ModelArguments
-from schemas.data import DataTrainingArguments
+from src.pixelsum.modeling_pixelsum import PIXELSumModel
+from schemas.custom_args import ModelArguments
+from schemas.custom_args import DataTrainingArguments
 
 logger = logging.getLogger(__name__)
 
-#wandb.init(project="pixelsum")
+wandb.init(project="pixelsum")
 
 def get_renderer(model_args: argparse.Namespace):
     renderer_cls = PyGameTextRenderer if model_args.rendering_backend == "pygame" else PangoCairoTextRenderer
@@ -105,7 +101,7 @@ def get_model_and_config(model_args: argparse.Namespace):
         if not model_args.train_decoder:
             for name, param in model.decoder.named_parameters():
                 if 'encoder_attn' not in name:
-                    param.requires_grad = True
+                    param.requires_grad = False
 
     elif "gpt" in model_args.decoder_name:
         if not model_args.train_decoder:
@@ -335,8 +331,6 @@ def main():
         trainer.log_metrics("predict", metrics)
         trainer.save_metrics("predict", metrics)
         
-        if data_args.log_predictions:
-            log_predictions(args=training_args, p=predict_results, tokenizer = tokenizer, prefix="test")
     
 if __name__ == '__main__':
     main()

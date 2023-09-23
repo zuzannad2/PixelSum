@@ -64,40 +64,12 @@ def get_tokenizer(model_args: argparse.Namespace):
 
     return tokenizer
 
-
-
-def log_predictions(args, p, tokenizer, prefix):
-    # Initialize wandb if not already done
-    if not args.do_train:
-        wandb.init(reinit=False)
-    
-    data = []
-    out_file = os.path.join(args.output_dir, f"{prefix}_predictions.csv")
-    with open(out_file, "w", encoding="utf-8") as f:
-        f.write("Prediction\Reference\n")
-        preds = np.argmax(p.predictions[0], axis=2)
-        label_ids = p.label_ids
-        for pred, id in zip(preds, label_ids):
-            p, r = tokenizer.decode(pred), tokenizer.decode(id)
-            data.append([p, r])
-            f.write(f"'Predicted: {p}\t, Reference: {r}\n")
-            f.write("\n")
-
-    logger.info(f"Saved predictions and labels to {out_file}")
-    logger.info(f"Logging as table to wandb")
-
-    preds_table = wandb.Table(columns=["Prediction", "Reference"], data=data)
-    wandb.log({f"{prefix}_outputs": preds_table})
-
-
 def load_model(model_args):  
-    config = PIXELSumConfig.from_pretrained(
-        "/home/vpz558/PixelSum/experiments/pretrained_gptsmall",
-    )
     model = PIXELSumModel.from_pretrained(
             model_args.model_path,
-            config=config
         )
+    
+    # Uncomment for loading a zero-shot inference
     # model = PIXELSumModel.from_encoder_decoder_pretrained(
     #         model_args.encoder_name,
     #         model_args.decoder_name,

@@ -34,9 +34,16 @@ pip install -e .
 4. Download fallback fonts using ```python3 -m scripts.data.download_fallback_fonts fonts```. Download the font GoNotoCurrent.ttf using the repo [go-noto-universal](https://github.com/satbyy/go-noto-universal) into the folder called "fonts".
 
 ## Pre-training PixelSum
-1. Download the WikiDump data
-2. ```wikiextractor -o wikidump --json --no-templates /path/to/enwiki-latest-pages-articles.xml.bz2```
-3. ```python3 -m scripts.data.prerendering.prerender_wikipedia```
+The pretraining scripts for training PixelSum with Huggingface's trainer (```run_pretraining.py```) or without the trainer (```run_pretrainer_no_trainer.py```) are located in ```scripts/training```. These are meant to be ran via bash scripts ```pretrain.sh``` / ```pretrain_no_trainer.sh``` and are configured for Slurm. 
 
 ## Finetuning PixelSum
-PixelSum can be finetuning by running ```train.sh``` which runs the ```run_summarisation.py``` script.
+The finetuning script for PixelSum is in ```scripts/training/run_finetuning.py```. The script is ran via ```finetune.sh```. 
+- You need to pass the pretrained model path in the  ```model_path``` argument.
+- The arguments ```train_encoder``` and ```train_decoder``` are set to False, meaning by default only the cross-attention layers will be trained. Adjust to desired setting. 
+
+## Inference 
+The inference script is in ```scripts/training/run_inference.py```. The script is ran via ```infer.sh```. 
+- Pass the pretrained model in ```model_path``` argument (leave empty string if zero-shot inference from model initialised ```from_encoder_decoder_pretrained```).
+
+## Logging
+By default scripts are set to log to WandB.
