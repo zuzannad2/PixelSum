@@ -4,10 +4,6 @@ This repository builts upon [**PIXEL**](https://github.com/xplip/pixel) and exte
 
 You can set-up this codebase in the following way:
 
-<details>
-  <summary><i>Show Instructions</i></summary>
-&nbsp;
-
 1. Clone repo and initialize submodules
 ```
 git clone https://github.com/zuzannad2/PixelSum.git
