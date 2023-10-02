@@ -291,7 +291,7 @@ class ModelArguments:
     def __post_init__(self):
         self.pooling_mode = PoolingMode.from_string(self.pooling_mode)
 
-        if not self.rendering_backend.lower() in ["pygame", "pangocairo"]:
-            raise ValueError("Invalid rendering backend. Supported backends are 'pygame' and 'pangocairo'.")
+        if not self.rendering_backend.lower() in ["pygame", "pangocairo", "bigrams"]:
+            raise ValueError("Invalid rendering backend. Supported backends are 'bigrams', 'pygame', and 'pangocairo'.")
         else:
             self.rendering_backend = self.rendering_backend.lower()

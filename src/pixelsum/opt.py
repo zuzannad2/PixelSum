@@ -102,10 +102,12 @@ class PixelOPTAttention(OPTAttention):
 
         if is_cross_attention:
             # self.k_proj = nn.Linear(768, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
-            self.k_proj = nn.Linear(1024, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            # self.k_proj = nn.Linear(1024, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            self.k_proj = nn.Linear(config.hidden_size, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            # self.v_proj = nn.Linear(1024, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             # self.k_proj = nn.Linear(2048, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             # self.v_proj = nn.Linear(768, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
-            self.v_proj = nn.Linear(1024, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            self.v_proj = nn.Linear(config.hidden_size, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             # self.v_proj = nn.Linear(2048, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             self.q_proj = nn.Linear(embed_dim, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             self.out_proj = nn.Linear(int(embed_dim / self.cross_attention_reduce_factor),embed_dim, bias=bias)

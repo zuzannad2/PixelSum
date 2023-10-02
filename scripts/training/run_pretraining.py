@@ -32,13 +32,21 @@ from pixel.utils.misc import get_attention_mask
 from src.pixelsum.modeling_pixelsum import PIXELSumModel
 from schemas.custom_args import ModelArguments
 from schemas.custom_args import DataTrainingArguments
+from src.pixel.data.rendering.pangocairo_renderer_bigrams import PangoCairoTextRenderer as PangoCairoBigramsRenderer
 
 logger = logging.getLogger(__name__)
 
 wandb.init(project="pixelsum")
 
 def get_renderer(model_args: argparse.Namespace):
-    renderer_cls = PyGameTextRenderer if model_args.rendering_backend == "pygame" else PangoCairoTextRenderer
+    if model_args.rendering_backend == "pygame":
+        renderer_cls = PyGameTextRenderer 
+    elif model_args.rendering_backend == "bigrams":
+        logger.info("Loading bigrams renderer")
+        renderer_cls = PangoCairoBigramsRenderer 
+    else:
+        renderer_cls = PangoCairoTextRenderer 
+        
     renderer = renderer_cls.from_pretrained(
             model_args.processor_name if model_args.processor_name else model_args.model_name_or_path,
             cache_dir=model_args.cache_dir,
@@ -153,6 +161,17 @@ def main():
     transforms = get_transforms(
         do_resize=True, 
         size=(renderer.pixels_per_patch, renderer.pixels_per_patch * renderer.max_seq_length))
+        
+    def string_to_ngrams(s:str, n:int=2) -> list:
+        """
+        Takes a string and returns a list of character n-grams by splitting `s` on every `n` character.
+        Args:
+            s (str): The input string to be converted to bigrams.
+            n (int): The frequency of which the input string is split. Defaults to `n`=2
+        Returns:
+            list: A list of character n-grams.
+        """
+        return [s[i:i + n] for i in range(0, len(s), n)]
 
     def preprocess_examples(batch):
         docs, summaries = batch['example'], batch['summary']
@@ -163,7 +182,7 @@ def main():
             return input_ids
         
         for document, summary in zip(docs, summaries):
-            encoding = renderer(document)
+            encoding = renderer(string_to_ngrams(' '.join(document.split())))
             image = encoding.pixel_values
             num_patches = encoding.num_text_patches
             
@@ -183,7 +202,7 @@ def main():
         return data
         
         
-    dataset = load_dataset("zuzannad1/pixelsum_wiki", split="train",cache_dir=data_args.data_cache_dir) # NOTE remove hardcoding
+    dataset = load_dataset(data_args.dataset_name, split="train",cache_dir=data_args.data_cache_dir) 
     
     split = dataset.train_test_split(test_size=0.1)
     
@@ -242,6 +261,7 @@ def main():
 
     def process_predictions(p: EvalPrediction):
         preds, labels = p
+        logger.info(f"{preds=}")
         if isinstance(preds, tuple):
             preds = preds[0]
         decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)

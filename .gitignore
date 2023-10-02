@@ -5,3 +5,6 @@ wandb/
 logs/
 notebooks/
 **/__pycache__/
+
+# Files to ignore
+*-jfl.sh
