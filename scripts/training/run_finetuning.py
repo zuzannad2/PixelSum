@@ -173,27 +173,28 @@ def main():
 
         return data
 
-    dataset = load_dataset(path = data_args.dataset_name, cache_dir=data_args.data_cache_dir)
+    dataset = load_dataset(path = data_args.dataset_name, cache_dir=data_args.data_cache_dir, keep_in_memory=True)
     
     if training_args.do_train:
         train_dataset = dataset['train']
         if data_args.max_train_samples is not None:
             train_dataset = train_dataset.shuffle().select(range(data_args.max_train_samples))
-        train_dataset = train_dataset.map(preprocess_examples, batched=True, remove_columns=["document", "summary", "id"],num_proc=data_args.preprocessing_num_workers)
+        train_dataset.set_transform(preprocess_examples)
+        # print(train_dataset[0])
         logger.info(f'Successfully loaded the training data with {len(train_dataset)} examples.')
 
     if training_args.do_eval:
         val_dataset = dataset['validation']
         if data_args.max_eval_samples is not None:
             val_dataset = val_dataset.select(range(data_args.max_eval_samples))
-        val_dataset = val_dataset.map(preprocess_examples, batched=True, remove_columns=["document", "summary", "id"], num_proc=data_args.preprocessing_num_workers)
+        val_dataset.set_transform(preprocess_examples)
         logger.info(f'Successfully loaded the validation data with {len(val_dataset)} examples.')
 
     if training_args.do_predict:
         test_dataset = dataset['test']
         if data_args.max_predict_samples is not None:
             test_dataset = test_dataset.select(range(data_args.max_predict_samples))
-        test_dataset = test_dataset.map(preprocess_examples, batched=True, remove_columns=["document", "summary", "id"], num_proc=data_args.preprocessing_num_workers)
+        test_dataset.set_transform(preprocess_examples)
         logger.info(f'Successfully loaded the testing data with {len(test_dataset)} examples.')
 
     logger.warning(

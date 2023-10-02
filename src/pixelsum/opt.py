@@ -101,10 +101,12 @@ class PixelOPTAttention(OPTAttention):
 
 
         if is_cross_attention:
-            #self.k_proj = nn.Linear(768, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
-            self.k_proj = nn.Linear(2048, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
-            #self.v_proj = nn.Linear(768, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
-            self.v_proj = nn.Linear(2048, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            # self.k_proj = nn.Linear(768, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            self.k_proj = nn.Linear(1024, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            # self.k_proj = nn.Linear(2048, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            # self.v_proj = nn.Linear(768, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            self.v_proj = nn.Linear(1024, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            # self.v_proj = nn.Linear(2048, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             self.q_proj = nn.Linear(embed_dim, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             self.out_proj = nn.Linear(int(embed_dim / self.cross_attention_reduce_factor),embed_dim, bias=bias)
 
@@ -249,8 +251,8 @@ class PixelOPTDecoderLayer(OPTDecoderLayer):
                 config=config,
                 is_cross_attention=True
             )
-            self.encoder_attn_layer_norm = nn.LayerNorm(self.embed_dim,elementwise_affine=True)
-        self.final_layer_norm = nn.LayerNorm(self.embed_dim,elementwise_affine=True)
+            self.encoder_attn_layer_norm = nn.LayerNorm(self.embed_dim,elementwise_affine=config.layer_norm_elementwise_affine)
+        # self.final_layer_norm = nn.LayerNorm(self.embed_dim,elementwise_affine=True)
 
     def forward(
         self,

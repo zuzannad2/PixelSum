@@ -19,11 +19,13 @@ conda activate venv
 
 3. Install Python packages
 ```bash
-conda install pytorch torchvision cudatoolkit=11.3 -c pytorch
-conda install -c conda-forge pycairo pygobject manimpango
+conda install pytorch torchvision cudatoolkit=11.7 -c pytorch
+conda install -c conda-forge pycairo=1.21.0 pygobject=3.42.1 manimpango=0.4.1
+conda install -c conda-forge git-lfs
+git lfs install 
 pip install --upgrade pip
 pip install -r requirements.txt
-pip install ./datasets
+pip install --upgrade datasets
 pip install -e .
 ```
 

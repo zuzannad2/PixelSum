@@ -1,0 +1,7 @@
+# Directories to ignore
+cached_data/
+experiments/
+wandb/
+logs/
+notebooks/
+**/__pycache__/

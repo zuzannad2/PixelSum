@@ -13,8 +13,9 @@ seqeval
 sklearn
 spacy
 submitit
-transformers==4.17.0
+transformers
 wandb
 evaluate
 rouge-score
 bert-score
+accelerate

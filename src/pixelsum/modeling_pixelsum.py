@@ -32,6 +32,7 @@ from transformers import (
 from pixelsum.configuration_pixelsum import PIXELSumConfig
 import wandb
 from pixelsum.opt import PixelOTPForCausalLM
+from pixel import AutoModel, PIXELModel, PIXELPreTrainedModel
 
 # Copied from transformers.models.encoder_decoder.modeling_encoder_decoder.shift_tokens_right
 def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: int, decoder_start_token_id: int):
@@ -188,10 +189,10 @@ class PIXELSumModel(PreTrainedModel):
         super().__init__(config)
 
         if encoder is None:
-            encoder = AutoModel.from_config(config.encoder)
+            encoder = PIXELModel.from_pretrained(config._name_or_path, config=config.encoder)
 
         if decoder is None:
-            decoder = AutoModelForCausalLM.from_config(config.decoder)
+            decoder = AutoModelForCausalLM.from_pretrained(config._name_or_path, config=config.decoder)
 
         self.encoder = encoder
         self.encoder.main_input_name = 'pixel_values'
@@ -399,6 +400,7 @@ class PIXELSumModel(PreTrainedModel):
                 # Cross attention factor... 
                 decoder = AutoModelForCausalLM.from_pretrained(decoder_pretrained_model_name_or_path, **kwargs_decoder)
             elif 'opt' in decoder_pretrained_model_name_or_path:
+                # decoder = AutoModelForCausalLM.from_pretrained(decoder_pretrained_model_name_or_path, **kwargs_decoder)
                 decoder = PixelOTPForCausalLM.from_pretrained(decoder_pretrained_model_name_or_path, **kwargs_decoder)
                 
         # instantiate config with corresponding kwargs
