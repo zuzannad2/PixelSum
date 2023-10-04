@@ -32,11 +32,46 @@ from pixel import (
     get_transforms,
 )
 from pixel.utils.misc import get_attention_mask
-from schemas.custom_args import ModelArguments,DataTrainingArguments
+from src.pixelsum.modeling_pixelsum import PIXELSumModel, ThisSeq2SeqTrainer
+from schemas.custom_args import ModelArguments, DataTrainingArguments, ThisSeq2SeqTrainingArguments
+from src.pixel.data.rendering.pangocairo_renderer_bigrams import PangoCairoTextRenderer as PangoCairoBigramsRenderer
+
 
 logger = logging.getLogger(__name__)
      
 wandb.init(project="pixelsum")
+
+def get_renderer(model_args: argparse.Namespace):
+    if model_args.rendering_backend == "pygame":
+        renderer_cls = PyGameTextRenderer 
+    elif model_args.rendering_backend == "bigrams":
+        logger.info("Loading bigrams renderer")
+        renderer_cls = PangoCairoBigramsRenderer 
+    else:
+        renderer_cls = PangoCairoTextRenderer 
+        
+    renderer = renderer_cls.from_pretrained(
+            model_args.processor_name if model_args.processor_name else model_args.model_name_or_path,
+            cache_dir=model_args.cache_dir,
+            revision=model_args.model_revision,
+            fallback_fonts_dir=model_args.fallback_fonts_dir,
+            rgb=model_args.render_rgb,
+        )
+    
+    return renderer
+
+def get_tokenizer(model_args: argparse.Namespace):
+    tokenizer = AutoTokenizer.from_pretrained(
+            model_args.tokenizer_name if model_args.tokenizer_name else model_args.decoder_name,
+            use_fast=model_args.use_fast_tokenizer,
+            add_prefix_space=True if model_args.decoder_name == "gpt2" else False,
+            cache_dir=model_args.cache_dir,
+            revision=model_args.model_revision,
+        )
+    tokenizer.pad_token = '<|pad|>'
+
+    return tokenizer
+
 
 def log_predictions(args, p, tokenizer, prefix):
     # Initialize wandb if not already done
@@ -61,39 +96,36 @@ def log_predictions(args, p, tokenizer, prefix):
     preds_table = wandb.Table(columns=["summary", "pred"], data=data)
     wandb.log({f"{prefix}_outputs": preds_table})
 
-def get_renderer_and_tokenizer(model_args: argparse.Namespace):
-    tokenizer = AutoTokenizer.from_pretrained(
-            model_args.tokenizer_name if model_args.tokenizer_name else model_args.decoder_name,
-            use_fast=model_args.use_fast_tokenizer,
-            add_prefix_space=True if model_args.decoder_name == "gpt2" else False,
-            cache_dir=model_args.cache_dir,
-            revision=model_args.model_revision,
-        )
-    tokenizer.pad_token = '<|pad|>'
-    renderer_cls = PyGameTextRenderer if model_args.rendering_backend == "pygame" else PangoCairoTextRenderer
-    renderer = renderer_cls.from_pretrained(
-            model_args.processor_name if model_args.processor_name else model_args.model_name_or_path,
-            cache_dir=model_args.cache_dir,
-            revision=model_args.model_revision,
-            fallback_fonts_dir=model_args.fallback_fonts_dir,
-            rgb=model_args.render_rgb,
-        )
-
-    return renderer, tokenizer
 
 def get_model_and_config(model_args: argparse.Namespace): 
-    model = PIXELSumModel.from_pretrained(
-            model_args.model_path,
+    
+    if len(model_args.model_path) == 0 or model_args.model_path is None:
+        model = PIXELSumModel.from_encoder_decoder_pretrained(
+            model_args.encoder_name,
+            model_args.decoder_name,
+            cross_attention_reduce_factor=1
         )
-
-    for param in model.encoder.parameters():
-        param.requires_grad = False
+    else:
+        model = PIXELSumModel.from_pretrained(
+                model_args.model_path,
+            )
+        
+    if not model_args.train_encoder:
+        for param in model.encoder.parameters():
+            param.requires_grad = False
+    else:
+        for name, param in model.encoder.named_parameters():
+            param.requires_grad = True
+            # Disable the lower layers
+            for n in range(0,6):
+                if f"encoder.layer.{n}" in name:
+                    param.requires_grad = False
 
     if "opt" in model_args.decoder_name:
         if not model_args.train_decoder:
             for name, param in model.decoder.named_parameters():
                 if 'encoder_attn' not in name:
-                    param.requires_grad = True
+                    param.requires_grad = False
 
     elif "gpt" in model_args.decoder_name:
         if not model_args.train_decoder:
@@ -110,7 +142,7 @@ def get_model_and_config(model_args: argparse.Namespace):
     return model, model.config
 
 def main():  
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, Seq2SeqTrainingArguments))  
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ThisSeq2SeqTrainingArguments))  
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     
     # Setup logging
@@ -129,7 +161,8 @@ def main():
     
     # Initialise model and processors
     model, config = get_model_and_config(model_args)
-    renderer, tokenizer = get_renderer_and_tokenizer(model_args)
+    renderer = get_renderer(model_args)
+    tokenizer = get_tokenizer(model_args)
     
     model.config.vocab_size = model.config.decoder.vocab_size
     model.config.decoder_start_token_id = tokenizer.eos_token_id
@@ -144,6 +177,17 @@ def main():
         do_resize=True, 
         size=(renderer.pixels_per_patch, renderer.pixels_per_patch * renderer.max_seq_length))
 
+    def string_to_ngrams(s:str, n:int=2) -> list:
+        """
+        Takes a string and returns a list of character n-grams by splitting `s` on every `n` character.
+        Args:
+            s (str): The input string to be converted to bigrams.
+            n (int): The frequency of which the input string is split. Defaults to `n`=2
+        Returns:
+            list: A list of character n-grams.
+        """
+        return [s[i:i + n] for i in range(0, len(s), n)]
+    
     def preprocess_examples(batch):
         documents, summaries, _ = batch['document'], batch['summary'], batch['id']
         data = {"pixel_values": [], "attention_mask": [], "label_ids": []}
@@ -155,6 +199,7 @@ def main():
         for document, summary in zip(documents, summaries):
             
             document = document.replace('\n','')
+            #encoding = renderer(string_to_ngrams(' '.join(document.split())))
             encoding = renderer(document)
             image = encoding.pixel_values
             num_patches = encoding.num_text_patches
@@ -178,7 +223,7 @@ def main():
     if training_args.do_train:
         train_dataset = dataset['train']
         if data_args.max_train_samples is not None:
-            train_dataset = train_dataset.shuffle().select(range(data_args.max_train_samples))
+            train_dataset = train_dataset.select(range(data_args.max_train_samples)).shuffle(seed=42)
         train_dataset.set_transform(preprocess_examples)
         # print(train_dataset[0])
         logger.info(f'Successfully loaded the training data with {len(train_dataset)} examples.')
@@ -271,7 +316,7 @@ def main():
 
     logger.info("Training/evaluation parameters %s", training_args)
 
-    trainer = Seq2SeqTrainer(
+    trainer = ThisSeq2SeqTrainer(
         model=model,
         args=training_args,
         data_collator=default_data_collator, 
