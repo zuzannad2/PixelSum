@@ -49,6 +49,7 @@ from transformers.modeling_outputs import (
 
 from transformers.models.opt.configuration_opt import OPTConfig
 
+logger = logging.get_logger(__name__)
 
 if version.parse(torch.__version__) >= version.parse("1.6"):
     is_amp_available = True

@@ -1,6 +1,8 @@
 from typing import Dict, List, Tuple, Union, Optional
 from dataclasses import dataclass, field
 from pixel import PoolingMode
+from transformers import Seq2SeqTrainingArguments
+from transformers.utils import add_start_docstrings
 
 @dataclass
 class DataTrainingArguments:
@@ -204,8 +206,22 @@ class TrainingArguments:
         default=1000
     )
     
-
-
+@dataclass
+@add_start_docstrings(Seq2SeqTrainingArguments.__doc__)
+class ThisSeq2SeqTrainingArguments(Seq2SeqTrainingArguments):
+    """
+    Args:
+        repetition_penalty (`float`, *optional*, defaults to 1.0):
+             See https://arxiv.org/abs/1909.05858 for details.
+    """
+    repetition_penalty: Optional[float] = field(
+        default=1.0,
+        metadata={
+            "help": (
+               "The parameter for repetition penalty. 1.0 means no penalty. See https://arxiv.org/abs/1909.05858 for details."
+            )
+        },
+    )
 
  
 @dataclass

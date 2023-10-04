@@ -29,9 +29,8 @@ from pixel import (
     get_transforms,
 )
 from pixel.utils.misc import get_attention_mask
-from src.pixelsum.modeling_pixelsum import PIXELSumModel
-from schemas.custom_args import ModelArguments
-from schemas.custom_args import DataTrainingArguments
+from src.pixelsum.modeling_pixelsum import PIXELSumModel, ThisSeq2SeqTrainer
+from schemas.custom_args import ModelArguments, DataTrainingArguments, ThisSeq2SeqTrainingArguments
 from src.pixel.data.rendering.pangocairo_renderer_bigrams import PangoCairoTextRenderer as PangoCairoBigramsRenderer
 
 logger = logging.getLogger(__name__)
@@ -80,7 +79,7 @@ def log_predictions(args, p, tokenizer, prefix):
         f.write("Prediction\Reference\n")
         preds = np.argmax(p.predictions[0], axis=2)
         label_ids = p.label_ids
-        for pred, id in zip(preds, label_ids):
+        for pred, id in zip(preds[:5], label_ids[:5]): # only log first 5
             p, r = tokenizer.decode(pred), tokenizer.decode(id)
             data.append([p, r])
             f.write(f"'Predicted: {p}\t, Reference: {r}\n")
@@ -127,7 +126,7 @@ def get_model_and_config(model_args: argparse.Namespace):
 
 
 def main():  
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, Seq2SeqTrainingArguments))  
+    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ThisSeq2SeqTrainingArguments))  
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
     
     # Setup logging
@@ -261,7 +260,7 @@ def main():
 
     def process_predictions(p: EvalPrediction):
         preds, labels = p
-        logger.info(f"{preds=}")
+        # logger.info(f"{preds=}")
         if isinstance(preds, tuple):
             preds = preds[0]
         decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
@@ -304,7 +303,8 @@ def main():
 
     logger.info("Training/evaluation parameters %s", training_args)
     
-    trainer = Seq2SeqTrainer(
+    # trainer = Seq2SeqTrainer(
+    trainer = ThisSeq2SeqTrainer(
         model=model,
         args=training_args,
         data_collator=default_data_collator, 
