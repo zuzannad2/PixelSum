@@ -245,6 +245,13 @@ class ModelArguments:
         default=True,
         metadata={"help": "Whether to use one of the fast tokenizer (backed by the tokenizers library) or not."},
     )
+    use_auth_token: str = field(
+        default=False,
+        metadata={
+            "help": "Will use the token generated when running `transformers-cli login` (necessary to use this script "
+            "with private models)."
+        },
+    )
     rendering_backend: Optional[str] = field(
         default="pangocairo", metadata={
             "help": "Rendering backend to use. Options are 'pygame' or 'pangocairo'. For most applications it is "
@@ -302,6 +309,14 @@ class ModelArguments:
         metadata={"help": (
             "Something"
         )}
+    )
+    training_loss_repetition_penalty: Optional[float] = field(
+        default=1.0,
+        metadata={
+            "help": (
+               "The parameter for repetition penalty. 1.0 means no penalty. See https://arxiv.org/abs/1909.05858 for details."
+            )
+        },
     )
 
     def __post_init__(self):

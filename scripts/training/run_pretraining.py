@@ -52,6 +52,7 @@ def get_renderer(model_args: argparse.Namespace):
             revision=model_args.model_revision,
             fallback_fonts_dir=model_args.fallback_fonts_dir,
             rgb=model_args.render_rgb,
+            use_auth_token=model_args.use_auth_token,
         )
     
     return renderer
@@ -97,7 +98,9 @@ def get_model_and_config(model_args: argparse.Namespace):
     model = PIXELSumModel.from_encoder_decoder_pretrained(
             model_args.encoder_name,
             model_args.decoder_name,
-            cross_attention_reduce_factor=1
+            cross_attention_reduce_factor=1,
+            training_loss_repetition_penalty=model_args.training_loss_repetition_penalty,
+            use_auth_token=model_args.use_auth_token,
         )
     if model_args.train_encoder:
         for param in model.encoder.parameters():
@@ -188,9 +191,15 @@ def main():
             pixel_values = transforms(Image.fromarray(image))
             attention_mask = get_attention_mask(num_patches, seq_length=529)
 
-            text_ids = tokenizer.encode(summary)
+            text_ids = tokenizer.encode(summary, add_special_tokens=False) 
+            # text_ids = tokenizer.encode(summary) 
+            # input_ids = tokenizer.encode(summary, add_special_tokens=True, 
+            #                             padding="max_length", 
+            #                             truncation=True,
+            #                             max_length=data_args.max_target_length)
             text_ids = text_ids[:data_args.max_target_length] # Truncate
             input_ids = _pad_input_ids(text_ids) # Pad
+            # print(f"PROCESS EXAMPLES: {input_ids=}")
         
             assert len(attention_mask) == 529
             

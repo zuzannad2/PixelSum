@@ -48,6 +48,7 @@ from transformers.modeling_outputs import (
 )
 
 from transformers.models.opt.configuration_opt import OPTConfig
+from transformers.generation.logits_process import RepetitionPenaltyLogitsProcessor
 
 logger = logging.get_logger(__name__)
 
@@ -629,6 +630,10 @@ class PixelOTPForCausalLM(OPTForCausalLM):
     def __init__(self, config):
         super().__init__(config)
         self.model = PixelOPTModel(config)
+        self.training_loss_repetition_penalty = config.training_loss_repetition_penalty
+        self.repetition_penalty_processor = RepetitionPenaltyLogitsProcessor(
+            config.training_loss_repetition_penalty,
+        )
 
 
     def forward(
@@ -672,6 +677,8 @@ class PixelOTPForCausalLM(OPTForCausalLM):
         )
 
         logits = self.lm_head(outputs[0]).contiguous()
+        # if self.training_loss_repetition_penalty != 1.0:
+        #     logits = self.repetition_penalty_processor(input_ids, logits)
 
         loss = None
         if labels is not None:

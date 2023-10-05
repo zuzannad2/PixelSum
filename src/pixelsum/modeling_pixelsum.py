@@ -103,7 +103,6 @@ class ThisSeq2SeqTrainer(Seq2SeqTrainer):
 
         if len(gen_kwargs) == 0 and hasattr(self, "_gen_kwargs"):
             gen_kwargs = self._gen_kwargs.copy()
-        # print(f"{gen_kwargs=}")
         
         if gen_kwargs.get("max_length") is None and gen_kwargs.get("max_new_tokens") is None:
             gen_kwargs["max_length"] = self.model.config.max_length
@@ -115,7 +114,6 @@ class ThisSeq2SeqTrainer(Seq2SeqTrainer):
             gen_kwargs["synced_gpus"] if gen_kwargs.get("synced_gpus") is not None else default_synced_gpus
         )
         gen_kwargs["repetition_penalty"] = self.args.repetition_penalty # NOTE : 1.5 is too low, 8.0 is enough, 1_000.0 is too high
-        print(f"{gen_kwargs=}")
 
         # If the `decoder_input_ids` was created from `labels`, evict the former, so that the model can freely generate
         # (otherwise, it would continue generating from the padded `decoder_input_ids`)
@@ -126,7 +124,6 @@ class ThisSeq2SeqTrainer(Seq2SeqTrainer):
         ):
             inputs = {k: v for k, v in inputs.items() if k != "decoder_input_ids"}
         generated_tokens = self.model.generate(**inputs, **gen_kwargs) # NOTE changed : added penalty 
-        # print(f"{generated_tokens=}")
 
         # Temporary hack to ensure the generation config is not initialized for each iteration of the evaluation loop
         # TODO: remove this hack when the legacy code that initializes generation_config from a model config is
@@ -136,7 +133,7 @@ class ThisSeq2SeqTrainer(Seq2SeqTrainer):
 
         # Retrieves GenerationConfig from model.generation_config
         gen_config = self.model.generation_config
-        # print(f"{gen_config=}")
+
         # in case the batch is shorter than max length, the output should be padded
         if generated_tokens.shape[-1] < gen_config.max_length:
             generated_tokens = self._pad_tensors_to_max_len(generated_tokens, gen_config.max_length)
@@ -325,6 +322,9 @@ class PIXELSumModel(PreTrainedModel):
         # so that the updates to the config will be synced
         self.encoder.config = self.config.encoder
         self.decoder.config = self.config.decoder
+        
+        # since gpt-2 does not have a pad token, we need to set it to eos_token_id
+        self.decoder.config.pad_token_id = self.decoder.config.pad_token_id if self.decoder.config.pad_token_id else self.decoder.config.eos_token_id
 
         # encoder outputs might need to be projected to different dimension for decoder
         if (
@@ -367,6 +367,8 @@ class PIXELSumModel(PreTrainedModel):
         encoder_pretrained_model_name_or_path: str = None,
         decoder_pretrained_model_name_or_path: str = None,
         cross_attention_reduce_factor: int = None,
+        training_loss_repetition_penalty: float = 1.0,
+        use_auth_token: Optional[Union[bool, str]] = False,
         *model_args,
         **kwargs
     ) -> PreTrainedModel:
@@ -458,6 +460,7 @@ class PIXELSumModel(PreTrainedModel):
                 )
 
             if "config" not in kwargs_encoder:
+                # kwargs_encoder["use_auth_token"] = use_auth_token # NOTE might need to switch on
                 encoder_config, kwargs_encoder = pixel.AutoConfig.from_pretrained(
                     encoder_pretrained_model_name_or_path, **kwargs_encoder, return_unused_kwargs=True
                 )
@@ -500,6 +503,7 @@ class PIXELSumModel(PreTrainedModel):
 
                 decoder_config.encoder_hidden_size = encoder.config.hidden_size
                 decoder_config.cross_attention_reduce_factor = cross_attention_reduce_factor
+                decoder_config.training_loss_repetition_penalty = training_loss_repetition_penalty
                 kwargs_decoder["config"] = decoder_config
             
             if kwargs_decoder["config"].is_decoder is False or kwargs_decoder["config"].add_cross_attention is False:
@@ -615,7 +619,7 @@ class PIXELSumModel(PreTrainedModel):
 
         if (labels is not None) and (decoder_input_ids is None and decoder_inputs_embeds is None):
             decoder_input_ids = shift_tokens_right(
-                labels, self.config.pad_token_id, self.config.decoder_start_token_id
+                labels, self.decoder.config.pad_token_id, self.config.decoder_start_token_id
             )
         
         # Decode
@@ -659,7 +663,7 @@ class PIXELSumModel(PreTrainedModel):
         )
 
     def prepare_decoder_input_ids_from_labels(self, labels: torch.Tensor):
-        return shift_tokens_right(labels, self.config.pad_token_id, self.config.decoder_start_token_id)
+        return shift_tokens_right(labels, self.decoder.config.pad_token_id, self.config.decoder_start_token_id)
 
     def prepare_inputs_for_generation(
         self, input_ids, past=None, attention_mask=None, use_cache=None, encoder_outputs=None, **kwargs
