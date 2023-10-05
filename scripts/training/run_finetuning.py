@@ -115,26 +115,33 @@ def get_model_and_config(model_args: argparse.Namespace):
         
     if not model_args.train_encoder:
         for param in model.encoder.parameters():
-            param.requires_grad = False
+            param.requires_grad_(False)
     else:
         for name, param in model.encoder.named_parameters():
-            param.requires_grad = True
+            if "embeddings." in name:
+                # we don't want to train the patch embeddings
+                param.requires_grad_(False)
+            elif any([f"layer.{n}." in name for n in range(0,6)]):
+                # Disable the lower layers
+                param.requires_grad_(False)
+            else:
+                param.requires_grad_(True)
             # Disable the lower layers
-            for n in range(0,6):
-                if f"encoder.layer.{n}" in name:
-                    param.requires_grad = False
+            # for n in range(0,6): 
+            #     if f"encoder.layer.{n}." in name:
+            #         param.requires_grad_(False)
 
     if "opt" in model_args.decoder_name:
         if not model_args.train_decoder:
             for name, param in model.decoder.named_parameters():
                 if 'encoder_attn' not in name:
-                    param.requires_grad = False
+                    param.requires_grad_(False)
 
     elif "gpt" in model_args.decoder_name:
         if not model_args.train_decoder:
             for name, param in model.decoder.named_parameters():
                 if 'crossattention' not in name:
-                    param.requires_grad = False
+                    param.requires_grad_(False)
    
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     num_trainable_params = sum([np.prod(p.size()) for p in model_parameters])
@@ -202,8 +209,10 @@ def main():
         for document, summary in zip(documents, summaries):
             
             document = document.replace('\n','')
-            #encoding = renderer(string_to_ngrams(' '.join(document.split())))
-            encoding = renderer(document)
+            if model_args.rendering_backend == "bigrams":
+                encoding = renderer(string_to_ngrams(' '.join(document.split())))
+            else:
+                encoding = renderer(document)
             image = encoding.pixel_values
             num_patches = encoding.num_text_patches
             pixel_values = transforms(Image.fromarray(image))
