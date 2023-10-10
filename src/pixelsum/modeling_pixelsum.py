@@ -303,7 +303,13 @@ class PIXELSumModel(PreTrainedModel):
             encoder = PIXELModel.from_pretrained(config._name_or_path, config=config.encoder)
 
         if decoder is None:
-            decoder = AutoModelForCausalLM.from_pretrained(config._name_or_path, config=config.decoder)
+            if 'gpt' in config.decoder._name_or_path:
+                # Cross attention factor... 
+                decoder = AutoModelForCausalLM.from_pretrained(config._name_or_path, config=config.decoder)
+            elif 'opt' in config.decoder._name_or_path:
+                # decoder = AutoModelForCausalLM.from_pretrained(decoder_pretrained_model_name_or_path, **kwargs_decoder)
+                decoder = PixelOTPForCausalLM.from_pretrained(config._name_or_path, config=config.decoder)
+            # decoder = AutoModelForCausalLM.from_pretrained(config._name_or_path, config=config.decoder)
 
         self.encoder = encoder
         self.encoder.main_input_name = 'pixel_values'
