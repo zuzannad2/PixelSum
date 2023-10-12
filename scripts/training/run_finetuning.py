@@ -20,9 +20,7 @@ import wandb
 import transformers
 from transformers import (
     AutoTokenizer,
-    Seq2SeqTrainer,
     default_data_collator,
-    Seq2SeqTrainingArguments,
     EvalPrediction,
     HfArgumentParser,
 )
@@ -126,12 +124,9 @@ def get_model_and_config(model_args: argparse.Namespace):
                 param.requires_grad_(False)
             else:
                 param.requires_grad_(True)
-            # Disable the lower layers
-            # for n in range(0,6): 
-            #     if f"encoder.layer.{n}." in name:
-            #         param.requires_grad_(False)
+            
 
-    if "opt" in model_args.decoder_name:
+    if "opt" in model_args.decoder_name or "xglm" in model_args.decoder_name:
         if not model_args.train_decoder:
             for name, param in model.decoder.named_parameters():
                 if 'encoder_attn' not in name:
@@ -287,6 +282,7 @@ def main():
         preds, labels = p
         if isinstance(preds, tuple):
             preds = preds[0]
+        preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
         decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
         if data_args.ignore_pad_token_for_loss:
             # Replace -100 in the labels as we can't decode them.
@@ -375,7 +371,6 @@ def main():
         trainer.log_metrics("predict", metrics)
         trainer.save_metrics("predict", metrics)
         
-
     
 if __name__ == '__main__':
     main()

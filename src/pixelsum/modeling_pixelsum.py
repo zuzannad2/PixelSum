@@ -14,12 +14,11 @@
 # limitations under the License.
 """ Classes to support Vision-Encoder-Text-Decoder architectures"""
 
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import pixel
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss
-from torch.utils.data import Dataset
 
 from transformers.file_utils import add_start_docstrings, add_start_docstrings_to_model_forward, replace_return_docstrings
 from transformers.modeling_outputs import Seq2SeqLMOutput, BaseModelOutput
@@ -32,10 +31,12 @@ from transformers import (
     PreTrainedModel, 
     logging,
     Seq2SeqTrainer,)
+
 from pixelsum.configuration_pixelsum import PIXELSumConfig
 import wandb
 from pixelsum.opt import PixelOTPForCausalLM
-from pixel import AutoModel, PIXELModel, PIXELPreTrainedModel
+from pixelsum.xglm import ThisXGLMForCausalLM
+from pixel import PIXELModel
 
 logger = logging.get_logger(__name__)
 
@@ -310,6 +311,8 @@ class PIXELSumModel(PreTrainedModel):
                 # decoder = AutoModelForCausalLM.from_pretrained(decoder_pretrained_model_name_or_path, **kwargs_decoder)
                 decoder = PixelOTPForCausalLM.from_pretrained(config._name_or_path, config=config.decoder)
             # decoder = AutoModelForCausalLM.from_pretrained(config._name_or_path, config=config.decoder)
+            elif 'xglm' in config.decoder._name_or_path:
+                decoder = ThisXGLMForCausalLM.from_pretrained(config._name_or_path, config=config.decoder)
 
         self.encoder = encoder
         self.encoder.main_input_name = 'pixel_values'
@@ -526,7 +529,8 @@ class PIXELSumModel(PreTrainedModel):
             elif 'opt' in decoder_pretrained_model_name_or_path:
                 # decoder = AutoModelForCausalLM.from_pretrained(decoder_pretrained_model_name_or_path, **kwargs_decoder)
                 decoder = PixelOTPForCausalLM.from_pretrained(decoder_pretrained_model_name_or_path, **kwargs_decoder)
-                
+            elif 'xglm' in decoder_pretrained_model_name_or_path:
+                decoder = ThisXGLMForCausalLM.from_pretrained(decoder_pretrained_model_name_or_path, **kwargs_decoder)
         # instantiate config with corresponding kwargs
         config = PIXELSumConfig.from_encoder_decoder_configs(encoder.config, decoder.config, **kwargs)
 
