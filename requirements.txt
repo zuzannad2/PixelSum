@@ -19,3 +19,4 @@ evaluate
 rouge-score
 bert-score
 accelerate
+sentencepiece
