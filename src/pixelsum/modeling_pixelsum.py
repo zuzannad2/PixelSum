@@ -301,7 +301,10 @@ class PIXELSumModel(PreTrainedModel):
         super().__init__(config)
 
         if encoder is None:
-            encoder = PIXELModel.from_pretrained(config._name_or_path, config=config.encoder)
+            if "bert" in config.encoder._name_or_path:
+                encoder = AutoModel.from_pretrained(config._name_or_path, config=config.encoder)
+            else:
+                encoder = PIXELModel.from_pretrained(config._name_or_path, config=config.encoder)
 
         if decoder is None:
             if 'gpt' in config.decoder._name_or_path:
@@ -468,24 +471,27 @@ class PIXELSumModel(PreTrainedModel):
                     "to be defined."
                 )
 
-            if "config" not in kwargs_encoder:
-                # kwargs_encoder["use_auth_token"] = use_auth_token # NOTE might need to switch on
-                encoder_config, kwargs_encoder = pixel.AutoConfig.from_pretrained(
-                    encoder_pretrained_model_name_or_path, **kwargs_encoder, return_unused_kwargs=True
-                )
-
-                if encoder_config.is_decoder is True or encoder_config.add_cross_attention is True:
-                    logger.info(
-                        f"Initializing {encoder_pretrained_model_name_or_path} as a encoder model "
-                        "from a decoder model. Cross-attention and casual mask are disabled."
+            if "bert" in encoder_pretrained_model_name_or_path:
+                encoder = AutoModel.from_pretrained(encoder_pretrained_model_name_or_path, *model_args, **kwargs_encoder)
+            else:
+                if "config" not in kwargs_encoder:
+                    # kwargs_encoder["use_auth_token"] = use_auth_token # NOTE might need to switch on
+                    encoder_config, kwargs_encoder = pixel.AutoConfig.from_pretrained(
+                        encoder_pretrained_model_name_or_path, **kwargs_encoder, return_unused_kwargs=True
                     )
-                    encoder_config.is_decoder = False
-                    encoder_config.add_cross_attention = False
 
-                kwargs_encoder["config"] = encoder_config
-            
-            # Pixel hardcoded here
-            encoder = pixel.PIXELModel.from_pretrained(encoder_pretrained_model_name_or_path, *model_args, **kwargs_encoder)
+                    if encoder_config.is_decoder is True or encoder_config.add_cross_attention is True:
+                        logger.info(
+                            f"Initializing {encoder_pretrained_model_name_or_path} as a encoder model "
+                            "from a decoder model. Cross-attention and casual mask are disabled."
+                        )
+                        encoder_config.is_decoder = False
+                        encoder_config.add_cross_attention = False
+
+                    kwargs_encoder["config"] = encoder_config
+                
+                # Pixel hardcoded here
+                encoder = pixel.PIXELModel.from_pretrained(encoder_pretrained_model_name_or_path, *model_args, **kwargs_encoder)
 
         decoder = kwargs_decoder.pop("model", None)
         if decoder is None:
@@ -597,6 +603,11 @@ class PIXELSumModel(PreTrainedModel):
         kwargs_decoder = {
             argument[len("decoder_") :]: value for argument, value in kwargs.items() if argument.startswith("decoder_")
         }
+
+        # NOTE 
+        if "bert" in self.encoder.config._name_or_path: # BERT does not accept an added dimension: sequence length
+            pixel_values = pixel_values.squeeze(1) 
+            attention_mask = attention_mask.squeeze(1)
 
         if encoder_outputs is None:
             if pixel_values is None:
