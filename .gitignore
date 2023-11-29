@@ -5,6 +5,7 @@ wandb/
 logs/
 notebooks/
 **/__pycache__/
+smart_eval/BLEURT-20
 
 # Files to ignore
 *-jfl.sh

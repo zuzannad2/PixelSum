@@ -10,7 +10,7 @@ pygame
 pyyaml
 scipy
 seqeval
-sklearn
+scikit-learn
 spacy
 submitit
 transformers
@@ -20,3 +20,4 @@ rouge-score
 bert-score
 accelerate
 sentencepiece
+ir-datasets
