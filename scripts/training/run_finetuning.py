@@ -45,7 +45,15 @@ logger = logging.getLogger(__name__)
 wandb.init(project="pixelsum")
 
 def get_renderer(model_args: argparse.Namespace):
-    if model_args.rendering_backend == "pygame":
+    if "bert" in model_args.encoder_name:
+        print("Loading bert tokenizer!! ***")
+        return AutoTokenizer.from_pretrained(
+            model_args.encoder_name,
+            use_fast=True,
+            add_prefix_space=True if model_args.encoder_name == "roberta-base" else False,
+            cache_dir=model_args.cache_dir,
+        )
+    elif model_args.rendering_backend == "pygame":
         renderer_cls = PyGameTextRenderer 
     elif model_args.rendering_backend == "bigrams":
         logger.info("Loading bigrams renderer")
@@ -102,6 +110,7 @@ def log_predictions(args, p, tokenizer, prefix):
 
 
 def get_model_and_config(model_args: argparse.Namespace): 
+    
     if "xglm" in model_args.decoder_name:
         AutoConfig.register("this_xglm", ThisXGLMConfig)
         AutoModel.register(ThisXGLMConfig, ThisXGLMForCausalLM)
@@ -119,22 +128,22 @@ def get_model_and_config(model_args: argparse.Namespace):
         model = PIXELSumModel.from_pretrained(
                 model_args.model_path,
             )
-        
-    if not model_args.train_encoder:
-        for param in model.encoder.parameters():
-            param.requires_grad_(False)
+    
+    if model_args.train_encoder:
+        logger.info("Updating the entire encoder")
+        pass
     else:
+        logger.info("Only updating the top half of the encoder")
         for name, param in model.encoder.named_parameters():
             if "embeddings." in name:
-                # we don't want to train the patch embeddings
-                param.requires_grad_(False)
+                # we still (right?) want to train the patch embeddings
+                param.requires_grad_(True)
             elif any([f"layer.{n}." in name for n in range(0,6)]):
                 # Disable the lower layers
                 param.requires_grad_(False)
             else:
                 param.requires_grad_(True)
-            
-
+    
     if "opt" in model_args.decoder_name or "xglm" in model_args.decoder_name or "bloom" in model_args.decoder_name:
         if not model_args.train_decoder:
             for name, param in model.decoder.named_parameters():
@@ -183,13 +192,14 @@ def main():
     model.config.pad_token_id = tokenizer.pad_token_id 
     model.config.eos_token_id = tokenizer.eos_token_id 
     model.encoder.config.do_eval = True
-    
+
     if 'gpt2' in model_args.decoder_name:
         model.decoder.config.task_specific_params['text-generation']['max_length'] = data_args.val_max_target_length
     
-    transforms = get_transforms(
-        do_resize=True, 
-        size=(renderer.pixels_per_patch, renderer.pixels_per_patch * renderer.max_seq_length))
+    if not "bert" in model_args.encoder_name:
+        transforms = get_transforms(
+            do_resize=True, 
+            size=(renderer.pixels_per_patch, renderer.pixels_per_patch * renderer.max_seq_length))
 
     def string_to_ngrams(s:str, n:int=2) -> list:
         """
@@ -203,8 +213,7 @@ def main():
         return [s[i:i + n] for i in range(0, len(s), n)]
     
     def preprocess_examples(batch):
-        documents, summaries, _ = batch['document'], batch['summary'], batch['id']
-        # documents, summaries = batch['text'], batch['target'] # NOTE consider
+        documents, summaries = batch['text'], batch['target']
         data = {"pixel_values": [], "attention_mask": [], "label_ids": []}
         
         def _pad_input_ids(input_ids, max_length=data_args.max_target_length):
@@ -218,6 +227,7 @@ def main():
                 encoding = renderer(string_to_ngrams(' '.join(document.split())))
             else:
                 encoding = renderer(document)
+
             image = encoding.pixel_values
             num_patches = encoding.num_text_patches
             pixel_values = transforms(Image.fromarray(image))
@@ -235,28 +245,81 @@ def main():
 
         return data
 
-    dataset = load_dataset(path = data_args.dataset_name, cache_dir=data_args.data_cache_dir, keep_in_memory=True)
-    
+    def preprocess_examples_bert(batch):
+        documents, summaries = batch['text'], batch['target']
+        # data = {"pixel_values": [], "token_type_ids": [], "attention_mask": [], "label_ids": []}
+        data = {"pixel_values": [], "attention_mask": [], "label_ids": []}
+        
+        def _pad_input_ids(input_ids, max_length=data_args.max_target_length):
+            input_ids += [-100] * (max_length - len(input_ids))
+            return input_ids
+        
+        for document, summary in zip(documents, summaries):
+            
+            # document = document.replace('\n','')
+            # if model_args.rendering_backend == "bigrams":
+            #     encoding = renderer(string_to_ngrams(' '.join(document.split())))
+            # else:
+            #     encoding = renderer(document)
+
+            # image = encoding.pixel_values
+            # num_patches = encoding.num_text_patches
+            # pixel_values = transforms(Image.fromarray(image))
+            # attention_mask = get_attention_mask(num_patches, seq_length=data_args.max_seq_length)
+            _data = renderer(document, padding='max_length', max_length=512, truncation=True, return_tensors='pt')
+            # print(f"{data=}")
+            # print(f"{type(data)=}")
+            
+            text_ids = tokenizer.encode(summary, add_special_tokens=False)
+            text_ids = text_ids[:data_args.max_target_length] # Truncate
+            input_ids = _pad_input_ids(text_ids) # Pad
+       
+            # assert len(attention_mask) == data_args.max_seq_length
+            
+            data["pixel_values"].append(_data['input_ids']) # NOTE not so pretty hack. Fix later !!!
+            # data["token_type_ids"].append(_data['token_type_ids'])
+            data["attention_mask"].append(_data['attention_mask'])
+            # data["pixel_values"].append(torch.tensor(pixel_values))
+            # data["attention_mask"].append(torch.tensor(attention_mask))
+            data["label_ids"].append(torch.tensor(input_ids))
+            
+            
+
+        return data
+
+    dataset = load_dataset(data_args.dataset_name, data_args.language, keep_in_memory=True)
+
     if training_args.do_train:
         train_dataset = dataset['train']
+        train_dataset = train_dataset.shuffle(seed=42)
         if data_args.max_train_samples is not None:
-            train_dataset = train_dataset.select(range(data_args.max_train_samples)).shuffle(seed=42)
-        train_dataset.set_transform(preprocess_examples)
+            train_dataset = train_dataset.select(range(data_args.max_train_samples))
+        if "bert" in model_args.encoder_name:
+            logger.info("Preprocessing examples for BERT")
+            train_dataset.set_transform(preprocess_examples_bert)
+        else:
+            train_dataset.set_transform(preprocess_examples)
         # print(train_dataset[0])
         logger.info(f'Successfully loaded the training data with {len(train_dataset)} examples.')
 
     if training_args.do_eval:
         val_dataset = dataset['validation']
         if data_args.max_eval_samples is not None:
-            val_dataset = val_dataset.select(range(data_args.max_eval_samples))
-        val_dataset.set_transform(preprocess_examples)
+            val_dataset = val_dataset.select(range(data_args.max_eval_samples)).shuffle(seed=42)
+        if "bert" in model_args.encoder_name:
+            val_dataset.set_transform(preprocess_examples_bert)
+        else:
+            val_dataset.set_transform(preprocess_examples)
         logger.info(f'Successfully loaded the validation data with {len(val_dataset)} examples.')
 
     if training_args.do_predict:
         test_dataset = dataset['test']
         if data_args.max_predict_samples is not None:
             test_dataset = test_dataset.select(range(data_args.max_predict_samples))
-        test_dataset.set_transform(preprocess_examples)
+        if "bert" in model_args.encoder_name:
+            test_dataset.set_transform(preprocess_examples_bert)
+        else:
+            test_dataset.set_transform(preprocess_examples)
         logger.info(f'Successfully loaded the testing data with {len(test_dataset)} examples.')
 
     logger.warning(
@@ -303,19 +366,19 @@ def main():
         push_predictions_to_wandb(decoded_preds[0:10], decoded_labels[0:10])
         return decoded_preds, decoded_labels
 
-    bertscore = evaluate.load('bertscore',)
+    # bertscore = evaluate.load('bertscore',)
     rouge = evaluate.load('rouge')
 
     def compute_metrics(p: EvalPrediction):
         predictions, labels = process_predictions(p)
         rouge_res = rouge.compute(predictions=predictions, references=labels)
-        bert = bertscore.compute(predictions=predictions, references=labels, lang='eng')
-        bert_res = {'precision': np.mean(bert['precision']), 'recall': np.mean(bert['recall']), 'f1': np.mean(bert['f1'])}
+        # bert = bertscore.compute(predictions=predictions, references=labels, lang='eng')
+        # bert_res = {'precision': np.mean(bert['precision']), 'recall': np.mean(bert['recall']), 'f1': np.mean(bert['f1'])}
         
         return {
-            "bertscore_precision": bert_res['precision'],
-            "bertscore_recall": bert_res['recall'],
-            "bertscore_f1": bert_res['f1'],
+            # "bertscore_precision": bert_res['precision'],
+            # "bertscore_recall": bert_res['recall'],
+            # "bertscore_f1": bert_res['f1'],
             "rouge1": rouge_res['rouge1'],
             "rouge2": rouge_res['rouge2'],
             "rougeL": rouge_res['rougeL'],
@@ -323,6 +386,10 @@ def main():
         }
 
     training_args.generation_num_beams = (
+        data_args.num_beams if data_args.num_beams is not None else training_args.generation_num_beams
+    )
+
+    model.decoder.config.num_beams = (
         data_args.num_beams if data_args.num_beams is not None else training_args.generation_num_beams
     )
 
@@ -399,7 +466,7 @@ def main():
             f.close()
 
             logger.info(f"Saved predictions and labels to {out_file}")
-    
+
     
 if __name__ == '__main__':
     main()
