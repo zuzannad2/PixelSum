@@ -5,9 +5,10 @@ import sys
 import datasets
 import evaluate
 import numpy as np
-from datasets import load_dataset
+from datasets import load_dataset, concatenate_datasets
 
 import argparse
+from pixelsum.xglm import ThisXGLMConfig, ThisXGLMForCausalLM
 from src.pixelsum.modeling_pixelsum import PIXELSumModel
 
 
@@ -23,6 +24,10 @@ from transformers import (
     default_data_collator,
     EvalPrediction,
     HfArgumentParser,
+    EarlyStoppingCallback,
+    AutoConfig,
+    AutoModel, 
+    AutoModelForCausalLM
 )
 from pixel import (
     PangoCairoTextRenderer,
@@ -97,7 +102,11 @@ def log_predictions(args, p, tokenizer, prefix):
 
 
 def get_model_and_config(model_args: argparse.Namespace): 
-    
+    if "xglm" in model_args.decoder_name:
+        AutoConfig.register("this_xglm", ThisXGLMConfig)
+        AutoModel.register(ThisXGLMConfig, ThisXGLMForCausalLM)
+        AutoModelForCausalLM.register(ThisXGLMConfig, ThisXGLMForCausalLM)
+
     if len(model_args.model_path) == 0 or model_args.model_path is None:
         model = PIXELSumModel.from_encoder_decoder_pretrained(
             model_args.encoder_name,
@@ -126,7 +135,7 @@ def get_model_and_config(model_args: argparse.Namespace):
                 param.requires_grad_(True)
             
 
-    if "opt" in model_args.decoder_name or "xglm" in model_args.decoder_name:
+    if "opt" in model_args.decoder_name or "xglm" in model_args.decoder_name or "bloom" in model_args.decoder_name:
         if not model_args.train_decoder:
             for name, param in model.decoder.named_parameters():
                 if 'encoder_attn' not in name:
@@ -195,6 +204,7 @@ def main():
     
     def preprocess_examples(batch):
         documents, summaries, _ = batch['document'], batch['summary'], batch['id']
+        # documents, summaries = batch['text'], batch['target'] # NOTE consider
         data = {"pixel_values": [], "attention_mask": [], "label_ids": []}
         
         def _pad_input_ids(input_ids, max_length=data_args.max_target_length):
@@ -290,11 +300,11 @@ def main():
         decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
         decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
 
-        push_predictions_to_wandb(decoded_preds, decoded_labels, "training")
+        push_predictions_to_wandb(decoded_preds[0:10], decoded_labels[0:10])
         return decoded_preds, decoded_labels
 
-
-    bertscore, rouge = evaluate.load('bertscore'), evaluate.load('rouge')
+    bertscore = evaluate.load('bertscore',)
+    rouge = evaluate.load('rouge')
 
     def compute_metrics(p: EvalPrediction):
         predictions, labels = process_predictions(p)
@@ -371,6 +381,25 @@ def main():
         trainer.log_metrics("predict", metrics)
         trainer.save_metrics("predict", metrics)
         
+        if data_args.log_predictions:    
+            out_file = os.path.join(training_args.output_dir, "test_predictions.csv")
+            preds, labels = predict_results.predictions, predict_results.label_ids
+            if isinstance(preds, tuple):
+                preds = preds[0]
+            preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
+            decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+            if data_args.ignore_pad_token_for_loss:
+                # Replace -100 in the labels as we can't decode them.
+                labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+            decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+            processed_preds, processed_labels = postprocess_text(decoded_preds, decoded_labels)
+            f = open(out_file, 'w')
+            for p in processed_preds:
+                f.write(str(p)+ "\n&&&&&\n")
+            f.close()
+
+            logger.info(f"Saved predictions and labels to {out_file}")
+    
     
 if __name__ == '__main__':
     main()

@@ -116,6 +116,24 @@ class DataTrainingArguments:
         },
     )
     
+    language: Optional[str] = field(
+        default='english',
+        metadata={
+            "help": (
+                "Language of the XLSum dataset to use."
+            )
+        }
+    )
+    bert_lang: Optional[str] = field(
+        default='eng',
+        metadata={
+            "help": (
+                "Language to use in BERTScore evaluation metric."
+            )
+
+        }
+    )
+    
 
     def __post_init__(self):
         if self.dataset_name is None:
@@ -294,7 +312,7 @@ class ModelArguments:
         },
     )
     dropout_prob: float = field(
-        default=0.2, metadata={"help": "Dropout probability for attention blocks and classification head"}
+        default=0.1, metadata={"help": "Dropout probability for attention blocks and classification head"}
     )
     train_encoder: bool = field(
         default=False,

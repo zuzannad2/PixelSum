@@ -136,9 +136,6 @@ class ThisXGLMAttention(XGLMAttention):
             value_states = past_key_value[1]
         elif is_cross_attention:
             # cross_attentions
-            #print("key_value_states",key_value_states.size())
-            #print("self.k_proj(key_value_states)",self.k_proj(key_value_states).size())
-                
             key_states = self._shape(self.k_proj(key_value_states), -1, bsz)
             value_states = self._shape(self.v_proj(key_value_states), -1, bsz)
         elif past_key_value is not None:
@@ -241,7 +238,6 @@ class ThisXGLMDecoderLayer(XGLMDecoderLayer):
         super().__init__(config)
 
         if config.add_cross_attention:
-            print("add cross")
             self.encoder_attn = ThisXGLMAttention(
                 embed_dim=self.embed_dim,
                 num_heads=config.attention_heads,
