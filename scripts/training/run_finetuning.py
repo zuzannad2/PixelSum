@@ -239,8 +239,8 @@ def main():
        
             assert len(attention_mask) == data_args.max_seq_length
             
-            data["pixel_values"].append(torch.tensor(pixel_values))
-            data["attention_mask"].append(torch.tensor(attention_mask))
+            data["pixel_values"].append(pixel_values)
+            data["attention_mask"].append(attention_mask)
             data["label_ids"].append(torch.tensor(input_ids))
 
         return data
