@@ -71,7 +71,7 @@ class ThisXGLMAttention(XGLMAttention):
         self,
         embed_dim,
         num_heads,
-        dropout= 0.0,
+        dropout=0.0,
         is_decoder= False,
         bias= True,
         config=None,
@@ -90,16 +90,18 @@ class ThisXGLMAttention(XGLMAttention):
             )
         self.scaling = self.head_dim**-0.5
         self.is_decoder = is_decoder
+        self.config = config
 
         self.cross_attention_reduce_factor = config.cross_attention_reduce_factor
         self.head_dim = int(self.head_dim / self.cross_attention_reduce_factor)
 
-
         if is_cross_attention:
             #print("self", int(embed_dim / self.cross_attention_reduce_factor))
-            self.k_proj = nn.Linear(config.hidden_size, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            self.k_proj = nn.Linear(embed_dim, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            # self.k_proj = nn.Linear(config.hidden_size, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             #print("self.k_proj",self.k_proj)
-            self.v_proj = nn.Linear(config.hidden_size, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            self.v_proj = nn.Linear(embed_dim, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
+            # self.v_proj = nn.Linear(config.hidden_size, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             self.q_proj = nn.Linear(embed_dim, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             self.out_proj = nn.Linear(int(embed_dim / self.cross_attention_reduce_factor),embed_dim, bias=bias)
 

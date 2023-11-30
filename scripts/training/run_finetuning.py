@@ -46,7 +46,7 @@ wandb.init(project="pixelsum")
 
 def get_renderer(model_args: argparse.Namespace):
     if "bert" in model_args.encoder_name:
-        print("Loading bert tokenizer!! ***")
+        logger.info("Loading the BERT tokenizer")
         return AutoTokenizer.from_pretrained(
             model_args.encoder_name,
             use_fast=True,
@@ -56,7 +56,7 @@ def get_renderer(model_args: argparse.Namespace):
     elif model_args.rendering_backend == "pygame":
         renderer_cls = PyGameTextRenderer 
     elif model_args.rendering_backend == "bigrams":
-        logger.info("Loading bigrams renderer")
+        logger.info("Loading the BIGRAMS renderer")
         renderer_cls = PangoCairoBigramsRenderer 
     else:
         renderer_cls = PangoCairoTextRenderer 
@@ -329,21 +329,9 @@ def main():
         training_args.fp16,
     )
 
-    def push_predictions_to_wandb(decoded_preds, decoded_labels, prefix):
-        data = []
-        out_file = os.path.join(training_args.output_dir, f"{prefix}_predictions.csv")
-        with open(out_file, "w", encoding="utf-8") as f:
-            f.write("pred\summary\n")
-            for p, r in zip(decoded_preds, decoded_labels):
-                data.append([p, r])
-                f.write(f"'Pred: {p}\t, Sum: {r}\n")
-                f.write("\n")
-
-        logger.info(f"Saved predictions, masks and labels to {out_file}")
-        logger.info(f"Logging as table to wandb")
-
-        preds_table = wandb.Table(columns=["pred", "summary"], data=data)
-        wandb.log({f"{prefix}_outputs": preds_table})
+    def push_predictions_to_wandb(decoded_preds, decoded_labels):
+        data = [[p,r] for p,r in zip(decoded_preds, decoded_labels)]
+        wandb.log({f"training_outputs": wandb.Table(columns=["Prediction", "Summary"], data=data)})
 
     def postprocess_text(preds, labels):
         preds = [pred.strip() for pred in preds]
