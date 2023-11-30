@@ -117,6 +117,7 @@ def get_model_and_config(model_args: argparse.Namespace):
         AutoModelForCausalLM.register(ThisXGLMConfig, ThisXGLMForCausalLM)
 
     if len(model_args.model_path) == 0 or model_args.model_path is None:
+        logger.info(f"Loading model from {model_args.encoder_name} and {model_args.decoder_name}")
         model = PIXELSumModel.from_encoder_decoder_pretrained(
             model_args.encoder_name,
             model_args.decoder_name,
@@ -125,6 +126,7 @@ def get_model_and_config(model_args: argparse.Namespace):
             use_auth_token=model_args.use_auth_token,
         )
     else:
+        logger.info(f"Loading model from {model_args.model_path}")
         model = PIXELSumModel.from_pretrained(
                 model_args.model_path,
             )

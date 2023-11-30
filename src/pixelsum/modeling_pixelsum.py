@@ -303,20 +303,22 @@ class PIXELSumModel(PreTrainedModel):
 
         if encoder is None:
             if "bert" in config.encoder._name_or_path:
-                encoder = AutoModel.from_pretrained(config._name_or_path, config=config.encoder)
+                encoder = AutoModel.from_config(config=config.encoder)
             else:
-                encoder = PIXELModel.from_pretrained(config._name_or_path, config=config.encoder)
+                encoder = PIXELModel(config=config.encoder)
+                # print("encoder state_dict", encoder.state_dict().keys())
 
         if decoder is None:
             if 'gpt' in config.decoder._name_or_path:
                 # Cross attention factor... 
-                decoder = AutoModelForCausalLM.from_pretrained(config._name_or_path, config=config.decoder)
+                decoder = AutoModelForCausalLM.from_config(config=config.decoder)
             elif 'opt' in config.decoder._name_or_path:
-                # decoder = AutoModelForCausalLM.from_pretrained(decoder_pretrained_model_name_or_path, **kwargs_decoder)
-                decoder = PixelOTPForCausalLM.from_pretrained(config._name_or_path, config=config.decoder)
-            # decoder = AutoModelForCausalLM.from_pretrained(config._name_or_path, config=config.decoder)
+                # decoder = AutoModelForCausalLM.from_config(decoder_pretrained_model_name_or_path, **kwargs_decoder)
+                decoder = PixelOTPForCausalLM(config=config.decoder) 
+            # decoder = AutoModelForCausalLM.from_config(config=config.decoder)
             elif 'xglm' in config.decoder._name_or_path:
-                decoder = ThisXGLMForCausalLM.from_pretrained(config._name_or_path, config=config.decoder)
+                decoder = ThisXGLMForCausalLM(config=config.decoder)
+
 
         self.encoder = encoder
         self.encoder.main_input_name = 'pixel_values'
