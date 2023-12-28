@@ -55,9 +55,12 @@ See `/home/rff/Documents/PixelSum/notebooks/laser.ipynb` for examples. Note, dow
 
 3. Install smart-eval
 ```bash
-# install bleurt from source
+# install bleurt from source: https://github.com/google-research/bleurt
 pip install sacrebleu
-pip install --upgrade tensorflow[and-cuda] # 🤞
+# If smart_eval should make use of GPU acceleration: pip install --upgrade tensorflow[and-cuda]
+# Otherwise, force tensorflow to CPU-only:
+pip uninstall tensorflow
+pip install tensorflow-cpu
 ```
 
 4. Download fallback fonts using ```python3 -m scripts.data.download_fallback_fonts fonts```. Download the font GoNotoCurrent.ttf using the repo [go-noto-universal](https://github.com/satbyy/go-noto-universal) into the folder called "fonts".

@@ -6,6 +6,8 @@ logs/
 notebooks/
 **/__pycache__/
 smart_eval/BLEURT-20
+datasets/
+wiki_data
 
 # Files to ignore
 *-jfl.sh

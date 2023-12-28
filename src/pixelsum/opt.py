@@ -103,14 +103,8 @@ class PixelOPTAttention(OPTAttention):
 
 
         if is_cross_attention:
-            # self.k_proj = nn.Linear(768, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
-            # self.k_proj = nn.Linear(1024, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             self.k_proj = nn.Linear(config.hidden_size, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
-            # self.v_proj = nn.Linear(1024, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
-            # self.k_proj = nn.Linear(2048, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
-            # self.v_proj = nn.Linear(768, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             self.v_proj = nn.Linear(config.hidden_size, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
-            # self.v_proj = nn.Linear(2048, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             self.q_proj = nn.Linear(embed_dim, int(embed_dim / self.cross_attention_reduce_factor), bias=bias)
             self.out_proj = nn.Linear(int(embed_dim / self.cross_attention_reduce_factor),embed_dim, bias=bias)
 
@@ -135,7 +129,9 @@ class PixelOPTAttention(OPTAttention):
 
         # if key_value_states are provided this layer is used as a cross-attention layer
         # for the decoder
+        
         is_cross_attention = key_value_states is not None
+        print('XA?', is_cross_attention)
 
         bsz, tgt_len, _ = hidden_states.size()
 
@@ -171,6 +167,7 @@ class PixelOPTAttention(OPTAttention):
             # if encoder bi-directional self-attention `past_key_value` is always `None`
             past_key_value = (key_states, value_states)
 
+
         proj_shape = (bsz * self.num_heads, -1, self.head_dim)
         query_states = self._shape(query_states, tgt_len, bsz).view(*proj_shape)
         key_states = key_states.view(*proj_shape)
@@ -178,7 +175,9 @@ class PixelOPTAttention(OPTAttention):
 
         src_len = key_states.size(1)
         attn_weights = torch.bmm(query_states, key_states.transpose(1, 2))
-
+    
+        print('k', key_states.shape, 'v', value_states.shape, 'q', query_states.shape)
+        
         if attn_weights.size() != (bsz * self.num_heads, tgt_len, src_len):
             raise ValueError(
                 f"Attention weights should be of size {(bsz * self.num_heads, tgt_len, src_len)}, but is"
@@ -307,9 +306,12 @@ class PixelOPTDecoderLayer(OPTDecoderLayer):
         # Cross-Attention Block
         cross_attn_present_key_value = None
         cross_attn_weights = None
+       
         if encoder_hidden_states is not None:
+            print('residual', residual.shape)
             residual = hidden_states
             hidden_states = self.encoder_attn_layer_norm(hidden_states)
+            print('hidden_state', hidden_states.shape)
             # cross_attn cached key/values tuple is at positions 3,4 of present_key_value tuple
             cross_attn_past_key_value = past_key_value[-2:] if past_key_value is not None else None
             hidden_states, cross_attn_weights, cross_attn_present_key_value = self.encoder_attn(
