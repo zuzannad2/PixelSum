@@ -7,6 +7,7 @@ import evaluate
 import numpy as np
 import pandas as pd 
 from datasets import load_dataset, concatenate_datasets
+from datetime import datetime
 
 import argparse
 from pixelsum.xglm import ThisXGLMConfig, ThisXGLMForCausalLM
@@ -16,6 +17,7 @@ import transformers
 import torch
 from PIL import Image
 import wandb
+import copy
 
 import transformers
 from transformers import (
@@ -206,6 +208,7 @@ def main():
     model, config = get_model_and_config(model_args)
     renderer = get_renderer(model_args)
     tokenizer = get_tokenizer(model_args)
+    logger.info(f"{tokenizer.is_fast=}")
     
     model.config.vocab_size = model.config.decoder.vocab_size
     model.config.decoder_start_token_id = tokenizer.eos_token_id
@@ -315,6 +318,7 @@ def main():
         val_dataset = dataset['validation']
         if data_args.max_eval_samples is not None:
             val_dataset = val_dataset.select(range(data_args.max_eval_samples)).shuffle(seed=training_args.seed)
+        copy_val_dataset_text = val_dataset['text'].copy()
         if "bert" in model_args.encoder_name:
             val_dataset.set_transform(preprocess_examples_bert)
             # val_dataset.set_transform(lambda x: preprocess_examples(x, test=True))
@@ -327,6 +331,7 @@ def main():
         test_dataset = dataset['test']
         if data_args.max_predict_samples is not None:
             test_dataset = test_dataset.select(range(data_args.max_predict_samples))
+        copy_test_dataset = copy.deepcopy(test_dataset)
         if "bert" in model_args.encoder_name:
             test_dataset.set_transform(preprocess_examples_bert)
             # test_dataset.set_transform(lambda x: preprocess_examples_bert(x, test=True))
@@ -349,7 +354,6 @@ def main():
     def postprocess_text(preds, labels):
         preds = [pred.strip() for pred in preds]
         labels = [label.strip() for label in labels]
-
         return preds, labels
 
     def process_predictions(p: EvalPrediction):
@@ -369,23 +373,33 @@ def main():
 
     # bertscore = evaluate.load('bertscore',)
     rouge = evaluate.load('rouge')
-    bleurt_scorer = SmartScorer(matching_fn=BleurtMatchingFunction(
-        data_args.bleurt_model_path,
-    ))
+    # bleurt_scorer = SmartScorer(matching_fn=BleurtMatchingFunction(
+    #     data_args.bleurt_model_path,
+    # ))
     chrf_scorer = SmartScorer(matching_fn=ChrfMatchingFunction())
 
     def compute_metrics(p: EvalPrediction):
         predictions, labels = process_predictions(p)
         rouge_res = rouge.compute(predictions=predictions, references=labels)
-        smart_eval_chrf_res = chrf_scorer.smart_score(candidate=predictions, reference=labels) # Following SMART, we compute CHRF source-free 
-        smart_eval_bleurt_res = bleurt_scorer.smart_score(
+        smart_eval_chrf_res = chrf_scorer.smart_score(
             candidate=predictions, 
-            reference=labels, 
-            source=list(val_dataset['text']).copy()) # Trainer does not shuffle eval data
+            reference=labels,
+            source=copy_val_dataset_text) # Following SMART, we compute CHRF as a source-dependent, string-based metric 
+        # smart_eval_bleurt_res = bleurt_scorer.smart_score(
+        #     candidate=predictions, 
+        #     reference=labels, 
+        #     source=copy_val_dataset_text) # Trainer does not shuffle eval data
         
         # bert = bertscore.compute(predictions=predictions, references=labels, lang='eng')
         # bert_res = {'precision': np.mean(bert['precision']), 'recall': np.mean(bert['recall']), 'f1': np.mean(bert['f1'])}
-        
+      
+        # Save predictions to csv with a unique timestamp
+        if data_args.log_predictions:
+            logger.info("Saving predictions to csv")
+            df_out = pd.DataFrame({'predictions': predictions, 'labels': labels, "source": copy_val_dataset_text})
+            out_file = os.path.join(training_args.output_dir, f"predictions_{datetime.now().strftime('%d-%m-%Y_%H-%M-%S')}.csv")
+            df_out.to_csv(out_file, index=False, sep='\t', header=True)
+    
         return {
             # "bertscore_precision": bert_res['precision'],
             # "bertscore_recall": bert_res['recall'],
@@ -394,8 +408,8 @@ def main():
             "rouge2": rouge_res['rouge2'],
             "rougeL": rouge_res['rougeL'],
             "rougeLsum": rouge_res['rougeLsum'],
-            "SMART-CHRF-L-F": smart_eval_chrf_res['smartL']['fmeasure'],
-            "SMART-BLEURT-L-F": smart_eval_bleurt_res['smartL']['fmeasure'],
+            "SMART-CHRF_L-Fmeasure": smart_eval_chrf_res['smartL']['fmeasure'],
+            # "SMART-BLEURT-L-F": smart_eval_bleurt_res['smartL']['fmeasure'],
         }
 
     training_args.generation_num_beams = (
@@ -473,7 +487,7 @@ def main():
                 labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
             decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
             processed_preds, processed_labels = postprocess_text(decoded_preds, decoded_labels)
-            df = pd.DataFrame(test_dataset)
+            df = pd.DataFrame(copy_test_dataset)
             df['predictions'] = pd.Series(processed_preds)
             df['processed_labels'] = pd.Series(processed_labels)
             df.to_csv(out_file, index=False, sep='\t', header=True)
