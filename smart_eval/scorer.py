@@ -20,8 +20,8 @@ from typing import Callable, Sequence
 from nltk import tokenize
 import numpy as np
 
-import aggregate_functions as af
-import matching_functions as mf
+import smart_eval.aggregate_functions as af
+import smart_eval.matching_functions as mf
 
 
 class SmartScorer:

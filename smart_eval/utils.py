@@ -25,8 +25,7 @@ from nltk.tokenize import sent_tokenize
 import numpy as np
 import scipy.stats
 
-from smart_eval import scorer
-
+from smart_eval.scorer import SmartScorer
 
 @dataclasses.dataclass
 class SummevalExample:
@@ -153,11 +152,11 @@ def calculate_smart_score(
   print(f'calculating scores using matcher {matcher_name}')
 
   if matcher:
-    smart_scorer = scorer.SmartScorer(matching_fn=matcher)
+    smart_scorer = SmartScorer(matching_fn=matcher)
   elif pairwise_scores:
     src_score_id = 0
     ref_score_id = 0
-    smart_scorer = scorer.SmartScorer()
+    smart_scorer = SmartScorer()
   else:
     raise ValueError('Either matcher or pairwise_scores should be provided.')
 

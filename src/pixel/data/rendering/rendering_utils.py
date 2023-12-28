@@ -420,6 +420,7 @@ class Encoding:
     sep_patches: List[int]
     num_text_patches: int
     word_starts: Optional[List[int]] = None
+    word_patch_map: Optional[Dict[int, str]] = None
     offset_mapping: Optional[List[Tuple[int, int]]] = None
     overflowing_patches: Optional[List] = None
     sequence_ids: Optional[List[Optional[int]]] = None
@@ -574,7 +575,7 @@ class TextRenderingMixin(PushToHubMixin):
         force_download = kwargs.get("force_download", False)
         resume_download = kwargs.get("resume_download", False)
         proxies = kwargs.get("proxies", None)
-        use_auth_token = kwargs.get("use_auth_token", None)
+        use_auth_token = kwargs.get("use_auth_token", True)
         local_files_only = kwargs.get("local_files_only", False)
         revision = kwargs.get("revision", None)
 
@@ -687,7 +688,7 @@ class TextRenderingMixin(PushToHubMixin):
         force_download = kwargs.pop("force_download", False)
         resume_download = kwargs.pop("resume_download", False)
         proxies = kwargs.pop("proxies", None)
-        use_auth_token = kwargs.pop("use_auth_token", None)
+        use_auth_token = kwargs.pop("use_auth_token", True)
         local_files_only = kwargs.pop("local_files_only", False)
         revision = kwargs.pop("revision", None)
 

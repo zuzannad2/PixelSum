@@ -666,6 +666,11 @@ class PIXELSumModel(PreTrainedModel):
             decoder_input_ids = shift_tokens_right(
                 labels, self.decoder.config.pad_token_id, self.config.decoder_start_token_id
             )
+            if decoder_attention_mask is None: # based on 
+                # https://github.com/hackyon/transformers/blob/fe586af1f5a4c725171155e9c64f9e1130cb1498/src/transformers/models/encoder_decoder/modeling_encoder_decoder.py
+                # from this issue: https://github.com/huggingface/transformers/issues/25271
+                # decoder_attention_mask = decoder_input_ids.new_tensor(decoder_input_ids != self.config.pad_token_id)
+                decoder_attention_mask = (decoder_input_ids != self.config.pad_token_id).to(decoder_input_ids.dtype).clone().detach()
         
         # Decode
         decoder_outputs = self.decoder(
@@ -735,5 +740,3 @@ class PIXELSumModel(PreTrainedModel):
         # apply decoder cache reordering here
         return self.decoder._reorder_cache(past, beam_idx)
     
-# TODO : implement prediction_step from SEQ2SEQ to pass repetition_penalty as training_arg
-# TODO : implement repetition_penalty for training loss as well

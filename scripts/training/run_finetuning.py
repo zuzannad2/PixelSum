@@ -5,16 +5,15 @@ import sys
 import datasets
 import evaluate
 import numpy as np
+import pandas as pd 
 from datasets import load_dataset, concatenate_datasets
 
 import argparse
 from pixelsum.xglm import ThisXGLMConfig, ThisXGLMForCausalLM
 from src.pixelsum.modeling_pixelsum import PIXELSumModel
 
-
 import transformers
 import torch
-import numpy as np
 from PIL import Image
 import wandb
 
@@ -27,7 +26,8 @@ from transformers import (
     EarlyStoppingCallback,
     AutoConfig,
     AutoModel, 
-    AutoModelForCausalLM
+    AutoModelForCausalLM,
+    set_seed,
 )
 from pixel import (
     PangoCairoTextRenderer,
@@ -37,8 +37,12 @@ from pixel import (
 from pixel.utils.misc import get_attention_mask
 from src.pixelsum.modeling_pixelsum import PIXELSumModel, ThisSeq2SeqTrainer
 from schemas.custom_args import ModelArguments, DataTrainingArguments, ThisSeq2SeqTrainingArguments
-from src.pixel.data.rendering.pangocairo_renderer_bigrams import PangoCairoTextRenderer as PangoCairoBigramsRenderer
 
+from src.pixel.data.rendering.pangocairo_renderer_bigrams_iso_char import PangoCairoTextRenderer as PangoCairoBigramsIsoCharRenderer
+from src.pixel.data.rendering.pangocairo_renderer_sliding_window_bigrams import PangoCairoTextRenderer as PangoCairoSlidingWindowBigramsRenderer
+
+from smart_eval.scorer import SmartScorer
+from smart_eval.matching_functions import BleurtMatchingFunction, ChrfMatchingFunction
 
 logger = logging.getLogger(__name__)
      
@@ -54,11 +58,16 @@ def get_renderer(model_args: argparse.Namespace):
             cache_dir=model_args.cache_dir,
         )
     elif model_args.rendering_backend == "pygame":
+        logger.info("Loading the PyGame renderer")
         renderer_cls = PyGameTextRenderer 
+    elif model_args.rendering_backend == "sliding_window_bigrams":
+        logger.info("Loading the sliding window bigrams renderer")
+        renderer_cls = PangoCairoSlidingWindowBigramsRenderer 
     elif model_args.rendering_backend == "bigrams":
-        logger.info("Loading the BIGRAMS renderer")
-        renderer_cls = PangoCairoBigramsRenderer 
+        logger.info("Loading the within-words bigrams renderer")
+        renderer_cls = PangoCairoBigramsIsoCharRenderer 
     else:
+        logger.info("Loading the continuous renderer")
         renderer_cls = PangoCairoTextRenderer 
         
     renderer = renderer_cls.from_pretrained(
@@ -134,17 +143,25 @@ def get_model_and_config(model_args: argparse.Namespace):
     if model_args.train_encoder:
         logger.info("Updating the entire encoder")
         pass
-    else:
+    elif "half" in model_args.train_encoder:
         logger.info("Only updating the top half of the encoder")
         for name, param in model.encoder.named_parameters():
             if "embeddings." in name:
-                # we still (right?) want to train the patch embeddings
+                # we still want to train the patch embeddings (right?) 
                 param.requires_grad_(True)
             elif any([f"layer.{n}." in name for n in range(0,6)]):
                 # Disable the lower layers
                 param.requires_grad_(False)
             else:
                 param.requires_grad_(True)
+    else:
+        logger.info("Freezing the entire encoder (except the patch embedding layer)")
+        for name, param in model.encoder.named_parameters():
+            if "embeddings." in name:
+                # we still want to train the patch embeddings (right?) 
+                param.requires_grad_(True)
+            else:
+                param.requires_grad_(False)
     
     if "opt" in model_args.decoder_name or "xglm" in model_args.decoder_name or "bloom" in model_args.decoder_name:
         if not model_args.train_decoder:
@@ -169,6 +186,7 @@ def get_model_and_config(model_args: argparse.Namespace):
 def main():  
     parser = HfArgumentParser((ModelArguments, DataTrainingArguments, ThisSeq2SeqTrainingArguments))  
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    set_seed(training_args.seed)
     
     # Setup logging
     logging.basicConfig(
@@ -203,19 +221,22 @@ def main():
             do_resize=True, 
             size=(renderer.pixels_per_patch, renderer.pixels_per_patch * renderer.max_seq_length))
 
-    def string_to_ngrams(s:str, n:int=2) -> list:
-        """
-        Takes a string and returns a list of character n-grams by splitting `s` on every `n` character.
-        Args:
-            s (str): The input string to be converted to bigrams.
-            n (int): The frequency of which the input string is split. Defaults to `n`=2
-        Returns:
-            list: A list of character n-grams.
-        """
-        return [s[i:i + n] for i in range(0, len(s), n)]
+    # def string_to_ngrams(s:str, n:int=2) -> list:
+    #     """
+    #     Takes a string and returns a list of character n-grams by splitting `s` on every `n` character.
+    #     Args:
+    #         s (str): The input string to be converted to bigrams.
+    #         n (int): The frequency of which the input string is split. Defaults to `n`=2
+    #     Returns:
+    #         list: A list of character n-grams.
+    #     """
+    #     return [s[i:i + n] for i in range(0, len(s), n)]
     
     def preprocess_examples(batch):
         documents, summaries = batch['text'], batch['target']
+        # if test: # NOTE: Consider making `data` a defaultdict(list) and only adding the raw_text and raw_summary keys if test=True
+        #     data = {"pixel_values": [], "attention_mask": [], "label_ids": [], "raw_text": [], "raw_summary": []}    
+        # else:
         data = {"pixel_values": [], "attention_mask": [], "label_ids": []}
         
         def _pad_input_ids(input_ids, max_length=data_args.max_target_length):
@@ -225,10 +246,7 @@ def main():
         for document, summary in zip(documents, summaries):
             
             document = document.replace('\n','')
-            if model_args.rendering_backend == "bigrams":
-                encoding = renderer(string_to_ngrams(' '.join(document.split())))
-            else:
-                encoding = renderer(document)
+            encoding = renderer(document)
 
             image = encoding.pixel_values
             num_patches = encoding.num_text_patches
@@ -244,12 +262,18 @@ def main():
             data["pixel_values"].append(pixel_values)
             data["attention_mask"].append(attention_mask)
             data["label_ids"].append(torch.tensor(input_ids))
+            # if test:
+            #     data["raw_text"].append(document)
+            #     data["raw_summary"].append(summary)
 
         return data
 
     def preprocess_examples_bert(batch):
         documents, summaries = batch['text'], batch['target']
         # data = {"pixel_values": [], "token_type_ids": [], "attention_mask": [], "label_ids": []}
+        # if test:
+        #     data = {"pixel_values": [], "attention_mask": [], "label_ids": [], "raw_text": [], "raw_summary": []}
+        # else:
         data = {"pixel_values": [], "attention_mask": [], "label_ids": []}
         
         def _pad_input_ids(input_ids, max_length=data_args.max_target_length):
@@ -258,34 +282,18 @@ def main():
         
         for document, summary in zip(documents, summaries):
             
-            # document = document.replace('\n','')
-            # if model_args.rendering_backend == "bigrams":
-            #     encoding = renderer(string_to_ngrams(' '.join(document.split())))
-            # else:
-            #     encoding = renderer(document)
-
-            # image = encoding.pixel_values
-            # num_patches = encoding.num_text_patches
-            # pixel_values = transforms(Image.fromarray(image))
-            # attention_mask = get_attention_mask(num_patches, seq_length=data_args.max_seq_length)
             _data = renderer(document, padding='max_length', max_length=512, truncation=True, return_tensors='pt')
-            # print(f"{data=}")
-            # print(f"{type(data)=}")
-            
+
             text_ids = tokenizer.encode(summary, add_special_tokens=False)
             text_ids = text_ids[:data_args.max_target_length] # Truncate
             input_ids = _pad_input_ids(text_ids) # Pad
-       
-            # assert len(attention_mask) == data_args.max_seq_length
-            
+                   
             data["pixel_values"].append(_data['input_ids']) # NOTE not so pretty hack. Fix later !!!
-            # data["token_type_ids"].append(_data['token_type_ids'])
             data["attention_mask"].append(_data['attention_mask'])
-            # data["pixel_values"].append(torch.tensor(pixel_values))
-            # data["attention_mask"].append(torch.tensor(attention_mask))
             data["label_ids"].append(torch.tensor(input_ids))
-            
-            
+            # if test:
+            #     data["raw_text"].append(document)
+            #     data["raw_summary"].append(summary)
 
         return data
 
@@ -293,7 +301,7 @@ def main():
 
     if training_args.do_train:
         train_dataset = dataset['train']
-        train_dataset = train_dataset.shuffle(seed=42)
+        train_dataset = train_dataset.shuffle(seed=training_args.seed)
         if data_args.max_train_samples is not None:
             train_dataset = train_dataset.select(range(data_args.max_train_samples))
         if "bert" in model_args.encoder_name:
@@ -301,17 +309,18 @@ def main():
             train_dataset.set_transform(preprocess_examples_bert)
         else:
             train_dataset.set_transform(preprocess_examples)
-        # print(train_dataset[0])
         logger.info(f'Successfully loaded the training data with {len(train_dataset)} examples.')
 
     if training_args.do_eval:
         val_dataset = dataset['validation']
         if data_args.max_eval_samples is not None:
-            val_dataset = val_dataset.select(range(data_args.max_eval_samples)).shuffle(seed=42)
+            val_dataset = val_dataset.select(range(data_args.max_eval_samples)).shuffle(seed=training_args.seed)
         if "bert" in model_args.encoder_name:
             val_dataset.set_transform(preprocess_examples_bert)
+            # val_dataset.set_transform(lambda x: preprocess_examples(x, test=True))
         else:
             val_dataset.set_transform(preprocess_examples)
+            # val_dataset.set_transform(lambda x: preprocess_examples(x, test=True))
         logger.info(f'Successfully loaded the validation data with {len(val_dataset)} examples.')
 
     if training_args.do_predict:
@@ -320,8 +329,10 @@ def main():
             test_dataset = test_dataset.select(range(data_args.max_predict_samples))
         if "bert" in model_args.encoder_name:
             test_dataset.set_transform(preprocess_examples_bert)
+            # test_dataset.set_transform(lambda x: preprocess_examples_bert(x, test=True))
         else:
             test_dataset.set_transform(preprocess_examples)
+            # test_dataset.set_transform(lambda x: preprocess_examples(x, test=True))
         logger.info(f'Successfully loaded the testing data with {len(test_dataset)} examples.')
 
     logger.warning(
@@ -358,10 +369,20 @@ def main():
 
     # bertscore = evaluate.load('bertscore',)
     rouge = evaluate.load('rouge')
+    bleurt_scorer = SmartScorer(matching_fn=BleurtMatchingFunction(
+        data_args.bleurt_model_path,
+    ))
+    chrf_scorer = SmartScorer(matching_fn=ChrfMatchingFunction())
 
     def compute_metrics(p: EvalPrediction):
         predictions, labels = process_predictions(p)
         rouge_res = rouge.compute(predictions=predictions, references=labels)
+        smart_eval_chrf_res = chrf_scorer.smart_score(candidate=predictions, reference=labels) # Following SMART, we compute CHRF source-free 
+        smart_eval_bleurt_res = bleurt_scorer.smart_score(
+            candidate=predictions, 
+            reference=labels, 
+            source=list(val_dataset['text']).copy()) # Trainer does not shuffle eval data
+        
         # bert = bertscore.compute(predictions=predictions, references=labels, lang='eng')
         # bert_res = {'precision': np.mean(bert['precision']), 'recall': np.mean(bert['recall']), 'f1': np.mean(bert['f1'])}
         
@@ -372,7 +393,9 @@ def main():
             "rouge1": rouge_res['rouge1'],
             "rouge2": rouge_res['rouge2'],
             "rougeL": rouge_res['rougeL'],
-            "rougeLsum": rouge_res['rougeLsum']
+            "rougeLsum": rouge_res['rougeLsum'],
+            "SMART-CHRF-L-F": smart_eval_chrf_res['smartL']['fmeasure'],
+            "SMART-BLEURT-L-F": smart_eval_bleurt_res['smartL']['fmeasure'],
         }
 
     training_args.generation_num_beams = (
@@ -427,7 +450,7 @@ def main():
 
     if training_args.do_predict:
         logger.info("*** Predict ***")
-        predict_results = trainer.predict(test_dataset, metric_key_prefix="test")
+        predict_results = trainer.predict(test_dataset, metric_key_prefix="test") # NOTE Figure out how to get source text and summary as part of the predictions output
         
         metrics = predict_results.metrics
         max_predict_samples = (
@@ -450,10 +473,10 @@ def main():
                 labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
             decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
             processed_preds, processed_labels = postprocess_text(decoded_preds, decoded_labels)
-            f = open(out_file, 'w')
-            for p in processed_preds:
-                f.write(str(p)+ "\n&&&&&\n")
-            f.close()
+            df = pd.DataFrame(test_dataset)
+            df['predictions'] = pd.Series(processed_preds)
+            df['processed_labels'] = pd.Series(processed_labels)
+            df.to_csv(out_file, index=False, sep='\t', header=True)
 
             logger.info(f"Saved predictions and labels to {out_file}")
 

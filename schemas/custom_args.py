@@ -133,6 +133,14 @@ class DataTrainingArguments:
 
         }
     )
+    bleurt_model_path: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": (
+                "Path to BLEURT checkpoint."
+            )
+        }
+    )
     
 
     def __post_init__(self):
@@ -282,7 +290,7 @@ class ModelArguments:
                           "PyGame backend."},
     ) 
     render_rgb: bool = field(
-        default=False,
+        default=True,
         metadata={
             "help": "Whether or not to render images in RGB. RGB rendering can be useful when working with emoji "
             "but it makes rendering a bit slower, so it is recommended to turn on RGB rendering only "
@@ -328,7 +336,7 @@ class ModelArguments:
             "Something"
         )}
     )
-    training_loss_repetition_penalty: Optional[float] = field(
+    training_loss_repetition_penalty: Optional[float] = field( # DISCARD
         default=1.0,
         metadata={
             "help": (

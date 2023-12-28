@@ -22,6 +22,7 @@ from transformers import (
     Seq2SeqTrainingArguments,
     EvalPrediction,
     HfArgumentParser,
+    EarlyStoppingCallback
 )
 from pixel import (
     PangoCairoTextRenderer,
@@ -120,7 +121,7 @@ def get_model_and_config(model_args: argparse.Namespace):
             #     if f"encoder.layer.{n}." in name:
             #         param.requires_grad_(False)
 
-    if "opt" in model_args.decoder_name:
+    if "opt" in model_args.decoder_name or "xglm" in model_args.decoder_name:
         if not model_args.train_decoder:
             for name, param in model.decoder.named_parameters():
                 if 'encoder_attn' not in name:
@@ -262,21 +263,9 @@ def main():
         training_args.fp16,
     )
 
-    def push_predictions_to_wandb(decoded_preds, decoded_labels, prefix):
-        data = []
-        out_file = os.path.join(training_args.output_dir, f"{prefix}_predictions.csv")
-        with open(out_file, "w", encoding="utf-8") as f:
-            f.write("Predicted\Reference\n")
-            for p, r in zip(decoded_preds, decoded_labels):
-                data.append([p, r])
-                f.write(f"'Predicted: {p} \t, Reference: {r} \n")
-                f.write("\n")
-
-        logger.info(f"Saved predictions, masks and labels to {out_file}")
-        logger.info(f"Logging as table to wandb")
-
-        preds_table = wandb.Table(columns=["Predicted", "Reference"], data=data)
-        wandb.log({f"{prefix}_outputs": preds_table})
+    def push_predictions_to_wandb(decoded_preds, decoded_labels):
+        data = [[p,r] for p,r in zip(decoded_preds, decoded_labels)]
+        wandb.log({f"training_outputs": wandb.Table(columns=["Prediction", "Summary"], data=data)})
 
     def postprocess_text(preds, labels):
         preds = [pred.strip() for pred in preds]
@@ -289,6 +278,7 @@ def main():
         # logger.info(f"{preds=}")
         if isinstance(preds, tuple):
             preds = preds[0]
+        preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
         decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
         if data_args.ignore_pad_token_for_loss:
             # Replace -100 in the labels as we can't decode them.
@@ -296,7 +286,7 @@ def main():
         decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
         decoded_preds, decoded_labels = postprocess_text(decoded_preds, decoded_labels)
 
-        push_predictions_to_wandb(decoded_preds, decoded_labels, "training")
+        push_predictions_to_wandb(decoded_preds[0:10], decoded_labels[0:10])
         return decoded_preds, decoded_labels
 
     bertscore, rouge = evaluate.load('bertscore'), evaluate.load('rouge')
@@ -338,7 +328,7 @@ def main():
         eval_dataset=val_dataset if training_args.do_eval else None,
         tokenizer=renderer,
         compute_metrics=compute_metrics,
-        #callbacks = [EarlyStoppingCallback(early_stopping_patience=training_args.early_stopping_patience)]
+        callbacks = [EarlyStoppingCallback(early_stopping_patience=3)]
     )
 
     last_checkpoint = None
