@@ -38,6 +38,7 @@ import wandb
 from pixelsum.opt import PixelOTPForCausalLM
 from pixelsum.xglm import ThisXGLMConfig, ThisXGLMForCausalLM
 from pixel import PIXELModel
+from pixelsum.bert import ThisBertModel
 
 logger = logging.get_logger(__name__)
 
@@ -303,10 +304,9 @@ class PIXELSumModel(PreTrainedModel):
 
         if encoder is None:
             if "bert" in config.encoder._name_or_path:
-                encoder = AutoModel.from_config(config=config.encoder)
+                encoder = ThisBertModel(config=config.encoder)
             else:
                 encoder = PIXELModel(config=config.encoder)
-                # print("encoder state_dict", encoder.state_dict().keys())
 
         if decoder is None:
             if 'gpt' in config.decoder._name_or_path:
@@ -488,7 +488,7 @@ class PIXELSumModel(PreTrainedModel):
                         encoder_config.add_cross_attention = False
 
                     kwargs_encoder["config"] = encoder_config
-                encoder = AutoModel.from_pretrained(encoder_pretrained_model_name_or_path, *model_args, **kwargs_encoder)
+                encoder = ThisBertModel.from_pretrained(encoder_pretrained_model_name_or_path, *model_args, **kwargs_encoder)
             else:
                 if "config" not in kwargs_encoder:
                     # kwargs_encoder["use_auth_token"] = use_auth_token # NOTE might need to switch on
@@ -628,10 +628,12 @@ class PIXELSumModel(PreTrainedModel):
             argument[len("decoder_") :]: value for argument, value in kwargs.items() if argument.startswith("decoder_")
         }
 
-        # NOTE 
-        if "bert" in self.encoder.config._name_or_path: # BERT does not accept an added dimension: sequence length
-            pixel_values = pixel_values.squeeze(1) 
-            attention_mask = attention_mask.squeeze(1)
+        # NOTE BERT does not accept an added dimension: sequence length
+        if "bert" in self.encoder.config._name_or_path: 
+            if pixel_values is not None and len(pixel_values.size()) == 3:
+                pixel_values = pixel_values.squeeze(1) 
+            if attention_mask is not None and len(attention_mask.size()) == 3:
+                attention_mask = attention_mask.squeeze(1)
 
         if encoder_outputs is None:
             if pixel_values is None:
@@ -660,7 +662,7 @@ class PIXELSumModel(PreTrainedModel):
             encoder_hidden_states = self.enc_to_dec_proj(encoder_hidden_states)
 
         # else:
-        encoder_attention_mask = None
+        # encoder_attention_mask = None # NOTE commented out 
 
         if (labels is not None) and (decoder_input_ids is None and decoder_inputs_embeds is None):
             decoder_input_ids = shift_tokens_right(
@@ -677,7 +679,7 @@ class PIXELSumModel(PreTrainedModel):
             input_ids=decoder_input_ids,
             attention_mask=decoder_attention_mask,
             encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=encoder_attention_mask,
+            encoder_attention_mask=attention_mask,
             inputs_embeds=decoder_inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
