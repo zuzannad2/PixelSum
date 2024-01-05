@@ -426,7 +426,7 @@ class PangoCairoTextRenderer(TextRenderingMixin):
         layout.set_text(word, -1)
 
         if layout.get_unknown_glyphs_count() > 0:
-            logger.warning(
+            logger.info(
                 f"Found {layout.get_unknown_glyphs_count()} unknown glyphs in word: {word} ({[ord(w) for w in word]}). Consider "
                 f"double-checking that the correct fonts are loaded."
             )
@@ -478,7 +478,7 @@ class PangoCairoTextRenderer(TextRenderingMixin):
         layout.set_text(word, -1)
 
         if layout.get_unknown_glyphs_count() > 0:
-            logger.warning(
+            logger.info(
                 f"Found {layout.get_unknown_glyphs_count()} unknown glyphs in word: {word} ({[ord(w) for w in word]}). Consider "
                 f"double-checking that the correct fonts are loaded."
             )
@@ -529,7 +529,7 @@ class PangoCairoTextRenderer(TextRenderingMixin):
         layout.set_text(word, -1)
 
         if layout.get_unknown_glyphs_count() > 0:
-            logger.warning(
+            logger.info(
                 f"Found {layout.get_unknown_glyphs_count()} unknown glyphs in word: {word} ({[ord(w) for w in word]}). Consider "
                 f"double-checking that the correct fonts are loaded."
             )
@@ -581,7 +581,7 @@ class PangoCairoTextRenderer(TextRenderingMixin):
         layout1.set_text(word[0], -1)
 
         if layout1.get_unknown_glyphs_count() > 0:
-            logger.warning(
+            logger.info(
                 f"Found {layout1.get_unknown_glyphs_count()} unknown glyphs in word: {word} ({[ord(w) for w in word]}). Consider "
                 f"double-checking that the correct fonts are loaded."
             )
@@ -608,7 +608,7 @@ class PangoCairoTextRenderer(TextRenderingMixin):
         layout2.set_text(word[1], -1)
 
         if layout2.get_unknown_glyphs_count() > 0:
-            logger.warning(
+            logger.info(
                 f"Found {layout2.get_unknown_glyphs_count()} unknown glyphs in word: {word} ({[ord(w) for w in word]}). Consider "
                 f"double-checking that the correct fonts are loaded."
             )
@@ -660,7 +660,7 @@ class PangoCairoTextRenderer(TextRenderingMixin):
         layout1.set_text(word[0], -1)
 
         if layout1.get_unknown_glyphs_count() > 0:
-            logger.warning(
+            logger.info(
                 f"Found {layout1.get_unknown_glyphs_count()} unknown glyphs in word: {word} ({[ord(w) for w in word]}). Consider "
                 f"double-checking that the correct fonts are loaded."
             )
@@ -682,7 +682,7 @@ class PangoCairoTextRenderer(TextRenderingMixin):
         layout2.set_text(word[1], -1)
 
         if layout2.get_unknown_glyphs_count() > 0:
-            logger.warning(
+            logger.info(
                 f"Found {layout2.get_unknown_glyphs_count()} unknown glyphs in word: {word} ({[ord(w) for w in word]}). Consider "
                 f"double-checking that the correct fonts are loaded."
             )
@@ -731,7 +731,7 @@ class PangoCairoTextRenderer(TextRenderingMixin):
         layout.set_text(sentence, -1)
 
         if layout.get_unknown_glyphs_count() > 0:
-            logger.warning(
+            logger.info(
                 f"Found {layout.get_unknown_glyphs_count()} unknown glyphs in sentence: {sentence}. Consider"
                 f" double-checking that the correct fonts are loaded."
             )

@@ -667,7 +667,7 @@ class PIXELSumModel(PreTrainedModel):
                 labels, self.decoder.config.pad_token_id, self.config.decoder_start_token_id
             )
             if decoder_attention_mask is None: # based on 
-                # https://github.com/hackyon/transformers/blob/fe586af1f5a4c725171155e9c64f9e1130cb1498/src/transformers/models/encoder_decoder/modeling_encoder_decoder.py
+                # https://github.com/hackyon/transformers/blob/fe586af1f5a4c725171155e9c64f9e1130cb1498/src/transformers/models/encoder_decoder/modeling_encoder_decoder.py#L623C23-L623C23
                 # from this issue: https://github.com/huggingface/transformers/issues/25271
                 # decoder_attention_mask = decoder_input_ids.new_tensor(decoder_input_ids != self.config.pad_token_id)
                 decoder_attention_mask = (decoder_input_ids != self.config.pad_token_id).to(decoder_input_ids.dtype).clone().detach()

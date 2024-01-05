@@ -1,5 +1,24 @@
-import logging
 import os
+
+rank = int(os.getenv('RANK', '0'))
+if rank == 0:
+    import tensorflow as tf
+    # Restrict TensorFlow to only use the last GPU. SMART-BLEURT will use (only) this GPU.
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        try:
+            # This is hacky...
+            tf.config.set_visible_devices(gpus[-1], 'GPU')
+            logical_devices = tf.config.list_logical_devices('GPU')
+            assert len(logical_devices) == 1, "Only one GPU should be visible to TensorFlow"
+        except RuntimeError as e:
+            # Visible devices must be set at program startup
+            print(e)
+    # Also, only first process loads the SMART scores
+    from smart_eval.scorer import SmartScorer
+    from smart_eval.matching_functions import BleurtMatchingFunction, ChrfMatchingFunction
+    
+import logging
 import sys
 
 import datasets
@@ -15,9 +34,11 @@ from src.pixelsum.modeling_pixelsum import PIXELSumModel
 
 import transformers
 import torch
+import torch.distributed as dist
 from PIL import Image
 import wandb
 import copy
+from tqdm import tqdm
 
 import transformers
 from transformers import (
@@ -43,16 +64,13 @@ from schemas.custom_args import ModelArguments, DataTrainingArguments, ThisSeq2S
 from src.pixel.data.rendering.pangocairo_renderer_bigrams_iso_char import PangoCairoTextRenderer as PangoCairoBigramsIsoCharRenderer
 from src.pixel.data.rendering.pangocairo_renderer_sliding_window_bigrams import PangoCairoTextRenderer as PangoCairoSlidingWindowBigramsRenderer
 
-from smart_eval.scorer import SmartScorer
-from smart_eval.matching_functions import BleurtMatchingFunction, ChrfMatchingFunction
-
 logger = logging.getLogger(__name__)
      
 wandb.init(project="pixelsum")
 
-def get_renderer(model_args: argparse.Namespace):
+def get_encoder_processor(model_args: argparse.Namespace): 
     if "bert" in model_args.encoder_name:
-        logger.info("Loading the BERT tokenizer")
+        logger.info("Loading the (m)BERT tokenizer")
         return AutoTokenizer.from_pretrained(
             model_args.encoder_name,
             use_fast=True,
@@ -61,18 +79,18 @@ def get_renderer(model_args: argparse.Namespace):
         )
     elif model_args.rendering_backend == "pygame":
         logger.info("Loading the PyGame renderer")
-        renderer_cls = PyGameTextRenderer 
+        processor_cls = PyGameTextRenderer 
     elif model_args.rendering_backend == "sliding_window_bigrams":
         logger.info("Loading the sliding window bigrams renderer")
-        renderer_cls = PangoCairoSlidingWindowBigramsRenderer 
+        processor_cls = PangoCairoSlidingWindowBigramsRenderer 
     elif model_args.rendering_backend == "bigrams":
         logger.info("Loading the within-words bigrams renderer")
-        renderer_cls = PangoCairoBigramsIsoCharRenderer 
+        processor_cls = PangoCairoBigramsIsoCharRenderer 
     else:
         logger.info("Loading the continuous renderer")
-        renderer_cls = PangoCairoTextRenderer 
+        processor_cls = PangoCairoTextRenderer 
         
-    renderer = renderer_cls.from_pretrained(
+    processor = processor_cls.from_pretrained(
             model_args.processor_name if model_args.processor_name else model_args.model_name_or_path,
             cache_dir=model_args.cache_dir,
             revision=model_args.model_revision,
@@ -81,9 +99,9 @@ def get_renderer(model_args: argparse.Namespace):
             use_auth_token=model_args.use_auth_token,
         )
     
-    return renderer
+    return processor
 
-def get_tokenizer(model_args: argparse.Namespace):
+def get_decoder_tokenizer(model_args: argparse.Namespace): 
     tokenizer = AutoTokenizer.from_pretrained(
             model_args.tokenizer_name if model_args.tokenizer_name else model_args.decoder_name,
             use_fast=model_args.use_fast_tokenizer,
@@ -121,7 +139,6 @@ def log_predictions(args, p, tokenizer, prefix):
 
 
 def get_model_and_config(model_args: argparse.Namespace): 
-    
     if "xglm" in model_args.decoder_name:
         AutoConfig.register("this_xglm", ThisXGLMConfig)
         AutoModel.register(ThisXGLMConfig, ThisXGLMForCausalLM)
@@ -206,9 +223,10 @@ def main():
     
     # Initialise model and processors
     model, config = get_model_and_config(model_args)
-    renderer = get_renderer(model_args)
-    tokenizer = get_tokenizer(model_args)
+    processor = get_encoder_processor(model_args)
+    tokenizer = get_decoder_tokenizer(model_args)
     logger.info(f"{tokenizer.is_fast=}")
+    logger.info(f"Process {rank=}; GPU rank={torch.cuda.current_device()}") 
     
     model.config.vocab_size = model.config.decoder.vocab_size
     model.config.decoder_start_token_id = tokenizer.eos_token_id
@@ -222,24 +240,10 @@ def main():
     if not "bert" in model_args.encoder_name:
         transforms = get_transforms(
             do_resize=True, 
-            size=(renderer.pixels_per_patch, renderer.pixels_per_patch * renderer.max_seq_length))
-
-    # def string_to_ngrams(s:str, n:int=2) -> list:
-    #     """
-    #     Takes a string and returns a list of character n-grams by splitting `s` on every `n` character.
-    #     Args:
-    #         s (str): The input string to be converted to bigrams.
-    #         n (int): The frequency of which the input string is split. Defaults to `n`=2
-    #     Returns:
-    #         list: A list of character n-grams.
-    #     """
-    #     return [s[i:i + n] for i in range(0, len(s), n)]
+            size=(processor.pixels_per_patch, processor.pixels_per_patch * processor.max_seq_length))
     
     def preprocess_examples(batch):
         documents, summaries = batch['text'], batch['target']
-        # if test: # NOTE: Consider making `data` a defaultdict(list) and only adding the raw_text and raw_summary keys if test=True
-        #     data = {"pixel_values": [], "attention_mask": [], "label_ids": [], "raw_text": [], "raw_summary": []}    
-        # else:
         data = {"pixel_values": [], "attention_mask": [], "label_ids": []}
         
         def _pad_input_ids(input_ids, max_length=data_args.max_target_length):
@@ -247,9 +251,9 @@ def main():
             return input_ids
         
         for document, summary in zip(documents, summaries):
-            
+            # NOTE consider getting word boundaries from Stanza for Chinese (and other languages?)
             document = document.replace('\n','')
-            encoding = renderer(document)
+            encoding = processor(document)
 
             image = encoding.pixel_values
             num_patches = encoding.num_text_patches
@@ -265,18 +269,11 @@ def main():
             data["pixel_values"].append(pixel_values)
             data["attention_mask"].append(attention_mask)
             data["label_ids"].append(torch.tensor(input_ids))
-            # if test:
-            #     data["raw_text"].append(document)
-            #     data["raw_summary"].append(summary)
 
         return data
 
     def preprocess_examples_bert(batch):
         documents, summaries = batch['text'], batch['target']
-        # data = {"pixel_values": [], "token_type_ids": [], "attention_mask": [], "label_ids": []}
-        # if test:
-        #     data = {"pixel_values": [], "attention_mask": [], "label_ids": [], "raw_text": [], "raw_summary": []}
-        # else:
         data = {"pixel_values": [], "attention_mask": [], "label_ids": []}
         
         def _pad_input_ids(input_ids, max_length=data_args.max_target_length):
@@ -284,8 +281,8 @@ def main():
             return input_ids
         
         for document, summary in zip(documents, summaries):
-            
-            _data = renderer(document, padding='max_length', max_length=512, truncation=True, return_tensors='pt')
+            document = document.replace('\n','')
+            _data = processor(document, padding='max_length', max_length=512, truncation=True, return_tensors='pt')
 
             text_ids = tokenizer.encode(summary, add_special_tokens=False)
             text_ids = text_ids[:data_args.max_target_length] # Truncate
@@ -294,9 +291,6 @@ def main():
             data["pixel_values"].append(_data['input_ids']) # NOTE not so pretty hack. Fix later !!!
             data["attention_mask"].append(_data['attention_mask'])
             data["label_ids"].append(torch.tensor(input_ids))
-            # if test:
-            #     data["raw_text"].append(document)
-            #     data["raw_summary"].append(summary)
 
         return data
 
@@ -321,10 +315,8 @@ def main():
         copy_val_dataset_text = val_dataset['text'].copy()
         if "bert" in model_args.encoder_name:
             val_dataset.set_transform(preprocess_examples_bert)
-            # val_dataset.set_transform(lambda x: preprocess_examples(x, test=True))
         else:
             val_dataset.set_transform(preprocess_examples)
-            # val_dataset.set_transform(lambda x: preprocess_examples(x, test=True))
         logger.info(f'Successfully loaded the validation data with {len(val_dataset)} examples.')
 
     if training_args.do_predict:
@@ -334,14 +326,12 @@ def main():
         copy_test_dataset = copy.deepcopy(test_dataset)
         if "bert" in model_args.encoder_name:
             test_dataset.set_transform(preprocess_examples_bert)
-            # test_dataset.set_transform(lambda x: preprocess_examples_bert(x, test=True))
         else:
             test_dataset.set_transform(preprocess_examples)
-            # test_dataset.set_transform(lambda x: preprocess_examples(x, test=True))
         logger.info(f'Successfully loaded the testing data with {len(test_dataset)} examples.')
 
     logger.warning(
-        "Device: %s, n_gpu: %s, 16-bits training: %s",
+        "Device: %s, n_gpu: %s, (fp)16-bits training: %s",
         training_args.device,
         training_args.n_gpu,
         training_args.fp16,
@@ -371,29 +361,59 @@ def main():
         push_predictions_to_wandb(decoded_preds[0:10], decoded_labels[0:10])
         return decoded_preds, decoded_labels
 
-    # bertscore = evaluate.load('bertscore',)
+    # bertscore = evaluate.load('bertscore',) # Not reporting bertscore
     rouge = evaluate.load('rouge')
-    # bleurt_scorer = SmartScorer(matching_fn=BleurtMatchingFunction(
-    #     data_args.bleurt_model_path,
-    # ))
-    chrf_scorer = SmartScorer(matching_fn=ChrfMatchingFunction())
+    if rank == 0: 
+        # As at the top of the docment, only the first process, which has access to the last GPU, 
+        # loads and computes the SMART scores
+        bleurt_scorer = SmartScorer(matching_fn=BleurtMatchingFunction(
+            data_args.bleurt_model_path,
+        ))
+        chrf_scorer = SmartScorer(matching_fn=ChrfMatchingFunction())
 
     def compute_metrics(p: EvalPrediction):
         predictions, labels = process_predictions(p)
         rouge_res = rouge.compute(predictions=predictions, references=labels)
-        smart_eval_chrf_res = chrf_scorer.smart_score(
-            candidate=predictions, 
-            reference=labels,
-            source=copy_val_dataset_text) # Following SMART, we compute CHRF as a source-dependent, string-based metric 
-        # smart_eval_bleurt_res = bleurt_scorer.smart_score(
-        #     candidate=predictions, 
-        #     reference=labels, 
-        #     source=copy_val_dataset_text) # Trainer does not shuffle eval data
         
-        # bert = bertscore.compute(predictions=predictions, references=labels, lang='eng')
-        # bert_res = {'precision': np.mean(bert['precision']), 'recall': np.mean(bert['recall']), 'f1': np.mean(bert['f1'])}
+        if rank == 0: 
+            # assert len(predictions) == len(copy_val_dataset_text), "Number of predictions and number of examples do not match"
+            smart_eval_chrf_list = []
+            smart_eval_bleurt_list = []
+            # Compute SMART scores for each example 
+            for pred, label, src in tqdm(zip(predictions, labels, copy_val_dataset_text), 
+                                        total=len(predictions), desc="Computing SMART scores", leave=False):
+                smart_eval_chrf_list.append(chrf_scorer.smart_score(
+                    candidate=pred, 
+                    reference=label,
+                    source=src)['smartL']['fmeasure']) # We only care about smartL
+                smart_eval_bleurt_list.append(bleurt_scorer.smart_score(
+                    candidate=pred, 
+                    reference=label,
+                    source=src)['smartL']['fmeasure'])
+            
+            smart_eval_chrf_res = torch.tensor([np.mean(smart_eval_chrf_list)], 
+                                               device=torch.device("cuda:0"), dtype=torch.float32) 
+            # NOTE it's important to specify device and dtype!
+            smart_eval_bleurt_res = torch.tensor([np.mean(smart_eval_bleurt_list)], 
+                                                 device=torch.device("cuda:0"), dtype=torch.float32)
+            logger.info(f"rank == 0: {smart_eval_chrf_res=}; {smart_eval_bleurt_res=}")
+            
+        else: # For the other processes, create placeholders for the results
+            smart_eval_chrf_res = torch.zeros([1], 
+                                              device=torch.device(f"cuda:{rank}"), dtype=torch.float32)
+            # NOTE dtype needs to be the same as for the main process
+            smart_eval_bleurt_res = torch.zeros([1], 
+                                                device=torch.device(f"cuda:{rank}"), dtype=torch.float32)
+            logger.info(f"rank != 0: {smart_eval_chrf_res=}; {smart_eval_bleurt_res=}")
+        
+        dist.barrier() # shouldn't be necessary
+        dist.broadcast(smart_eval_chrf_res, src=0)
+        dist.broadcast(smart_eval_bleurt_res, src=0)
+        smart_eval_chrf_out = smart_eval_chrf_res.item()
+        smart_eval_bleurt_out = smart_eval_bleurt_res.item()
+        logger.info(f"After broadcasting ({rank=}): {smart_eval_chrf_out=}; {smart_eval_bleurt_out=}")
       
-        # Save predictions to csv with a unique timestamp
+        # Save predictions as csv incl. timestamp
         if data_args.log_predictions:
             logger.info("Saving predictions to csv")
             df_out = pd.DataFrame({'predictions': predictions, 'labels': labels, "source": copy_val_dataset_text})
@@ -401,15 +421,12 @@ def main():
             df_out.to_csv(out_file, index=False, sep='\t', header=True)
     
         return {
-            # "bertscore_precision": bert_res['precision'],
-            # "bertscore_recall": bert_res['recall'],
-            # "bertscore_f1": bert_res['f1'],
             "rouge1": rouge_res['rouge1'],
             "rouge2": rouge_res['rouge2'],
             "rougeL": rouge_res['rougeL'],
             "rougeLsum": rouge_res['rougeLsum'],
-            "SMART-CHRF_L-Fmeasure": smart_eval_chrf_res['smartL']['fmeasure'],
-            # "SMART-BLEURT-L-F": smart_eval_bleurt_res['smartL']['fmeasure'],
+            "SMART-CHRF_L-Fmeasure": smart_eval_chrf_out,
+            "SMART-BLEURT_L-Fmeasure": smart_eval_bleurt_out,
         }
 
     training_args.generation_num_beams = (
@@ -434,7 +451,7 @@ def main():
         data_collator=default_data_collator, 
         train_dataset=train_dataset if training_args.do_train else None,
         eval_dataset=val_dataset if training_args.do_eval else None,
-        tokenizer=renderer,
+        tokenizer=processor,
         compute_metrics=compute_metrics,
         #callbacks = [EarlyStoppingCallback(early_stopping_patience=training_args.early_stopping_patience)]
     )
@@ -464,7 +481,7 @@ def main():
 
     if training_args.do_predict:
         logger.info("*** Predict ***")
-        predict_results = trainer.predict(test_dataset, metric_key_prefix="test") # NOTE Figure out how to get source text and summary as part of the predictions output
+        predict_results = trainer.predict(test_dataset, metric_key_prefix="test") 
         
         metrics = predict_results.metrics
         max_predict_samples = (
