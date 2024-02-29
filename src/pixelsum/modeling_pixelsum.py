@@ -662,7 +662,7 @@ class PIXELSumModel(PreTrainedModel):
             encoder_hidden_states = self.enc_to_dec_proj(encoder_hidden_states)
 
         # else:
-        # encoder_attention_mask = None # NOTE commented out 
+        encoder_attention_mask = None 
 
         if (labels is not None) and (decoder_input_ids is None and decoder_inputs_embeds is None):
             decoder_input_ids = shift_tokens_right(
@@ -679,7 +679,7 @@ class PIXELSumModel(PreTrainedModel):
             input_ids=decoder_input_ids,
             attention_mask=decoder_attention_mask,
             encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=attention_mask,
+            encoder_attention_mask=encoder_attention_mask, # attention_mask,
             inputs_embeds=decoder_inputs_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,

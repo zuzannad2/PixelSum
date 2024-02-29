@@ -8,6 +8,7 @@ notebooks/
 smart_eval/BLEURT-20
 datasets/
 wiki_data
+TAd-models/
 
 # Files to ignore
 *-jfl.sh

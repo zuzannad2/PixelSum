@@ -238,6 +238,11 @@ class SmartScorer:
     """
     # Split reference/candidate into sentences if necessary.
     src_sentences = None
+    
+    # Check for empty candidate (we assume the reference and source are not empty)
+    if not candidate:
+      candidate = type(reference)(chr(0xFFFC)) # the ORC character
+      
     if isinstance(reference, str):
       ref_sentences = self.split_fn(reference)
       can_sentences = self.split_fn(candidate)
